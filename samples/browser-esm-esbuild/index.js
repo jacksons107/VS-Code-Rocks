@@ -36,57 +36,44 @@ const rockOverlay = {
 };
 editor.addOverlayWidget(rockOverlay);
 
-// --- Function to recompute wrapper position + size ---
-function updateWrapper() {
+// --- Keep track of all active zones ---
+let rockZoneIds = [];
+let rockDecorationIds = [];
+
+// --- Combined update function for all three rock experiments ---
+function updateAllRocks() {
 	const model = editor.getModel();
 	if (!model) return;
 
 	const lineCount = model.getLineCount();
 
+	// 1. Update wrapper overlay (yellow box)
 	const startPos = new monaco.Position(1, 1);
 	const endPos = new monaco.Position(lineCount, model.getLineMaxColumn(lineCount));
 
 	const startCoords = editor.getScrolledVisiblePosition(startPos);
 	const endCoords = editor.getScrolledVisiblePosition(endPos);
 
-	if (!startCoords || !endCoords) return;
+	if (startCoords && endCoords) {
+		const contentWidth = editor.getLayoutInfo().contentWidth;
+		const top = startCoords.top;
+		const height = endCoords.top + endCoords.height - startCoords.top;
 
-	const contentWidth = editor.getLayoutInfo().contentWidth;
-	const top = startCoords.top;
-	const height = endCoords.top + endCoords.height - startCoords.top;
+		rockRect.style.top = `${top}px`;
+		rockRect.style.left = `${startCoords.left}px`;
+		rockRect.style.width = `${contentWidth - 20}px`;
+		rockRect.style.height = `${height}px`;
+	}
 
-	rockRect.style.top = `${top}px`;
-	rockRect.style.left = `${startCoords.left}px`;
-	rockRect.style.width = `${contentWidth - 20}px`;
-	rockRect.style.height = `${height}px`;
-}
-
-// --- Hook into editor events ---
-editor.onDidScrollChange(updateWrapper);
-editor.onDidLayoutChange(updateWrapper);
-editor.onDidChangeModelContent(updateWrapper);
-
-// --- Initial render ---
-updateWrapper();
-
-// --- Keep track of all active zones ---
-let rockZoneIds = [];
-
-// --- Function to insert ViewZones between lines ---
-function addRockZones() {
-	const model = editor.getModel();
-	if (!model) return;
-
-	const lineCount = model.getLineCount();
-
+	// 2. Update ViewZones (rocks between lines)
 	editor.changeViewZones((accessor) => {
-		// Step 1: Remove all existing zones
+		// Remove all existing zones
 		for (const id of rockZoneIds) {
 			accessor.removeZone(id);
 		}
 		rockZoneIds = [];
 
-		// Step 2: Add one rock zone after each line
+		// Add one rock zone after each line
 		for (let line = 1; line <= lineCount; line++) {
 			const domNode = document.createElement('div');
 			domNode.textContent = '🪨';
@@ -106,47 +93,19 @@ function addRockZones() {
 			rockZoneIds.push(id);
 		}
 	});
-}
 
-// --- Initial render ---
-addRockZones();
-
-// --- Re-render dynamically on edits and layout changes ---
-editor.onDidChangeModelContent(() => {
-	requestAnimationFrame(() => addRockZones());
-});
-editor.onDidLayoutChange(() => addRockZones());
-
-// --- Rock decorations (after every token) - Using model.deltaDecorations ---
-let rockDecorationIds = [];
-
-function addRocksAfterTokens() {
-	const model = editor.getModel();
-	if (!model) return;
-
-	console.log('Adding rocks after tokens...');
-
+	// 3. Update token decorations (rocks between tokens)
 	const newDecorations = [];
-	const lineCount = model.getLineCount();
 
 	for (let line = 1; line <= lineCount; line++) {
 		const content = model.getLineContent(line);
-
-		console.log(`Line ${line}: "${content}"`);
-
 		const tokens = monaco.editor.tokenize(content, model.getLanguageId())[0];
-
-		console.log(`  Tokens:`, tokens);
 
 		if (!tokens || tokens.length === 0) continue;
 
 		for (let i = 0; i < tokens.length; i++) {
-			const startCol = tokens[i].offset + 1;
 			const endCol = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
 
-			console.log(`  Token ${i}: cols ${startCol}-${endCol}, type: ${tokens[i].type}`);
-
-			// Add decoration after each token using inlineClassName
 			newDecorations.push({
 				range: new monaco.Range(line, endCol, line, endCol),
 				options: {
@@ -159,18 +118,21 @@ function addRocksAfterTokens() {
 		}
 	}
 
-	console.log(`Total decorations to add: ${newDecorations.length}`);
-
-	// Use model.deltaDecorations instead of editor method
+	// Apply decorations
 	rockDecorationIds = model.deltaDecorations(rockDecorationIds, newDecorations);
-
-	console.log('Decorations applied!', rockDecorationIds);
 }
 
-// Trigger initial render
+// --- Hook into editor events ---
+editor.onDidScrollChange(updateAllRocks);
+editor.onDidLayoutChange(updateAllRocks);
+editor.onDidChangeModelContent(() => {
+	requestAnimationFrame(updateAllRocks);
+});
+
+// --- Initial render ---
 setTimeout(() => {
-	addRocksAfterTokens();
-}, 500);
+	updateAllRocks();
+}, 100);
 
 // --- Style for rock glyphs ---
 const style = document.createElement('style');
