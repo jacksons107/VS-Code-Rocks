@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"sourceMap": true,
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"target": "es5",
+		"outDir": "./dist",
+		"lib": ["dom", "es5", "es2015.collection", "es2015.promise"],
+		"types": [],
+		"baseUrl": "./",
+		"jsx": "preserve",
+		"typeRoots": ["node_modules/@types"],
+		"paths": {
+			"monaco-editor": ["../../out/monaco-editor/esm/vs/editor/editor.api.d.ts"]
+		}
+	},
+	"include": ["./src/**/*"],
+	"exclude": ["node_modules"]
+}

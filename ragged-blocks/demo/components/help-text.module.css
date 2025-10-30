@@ -1,0 +1,55 @@
+.helpTextRoot {
+	column-gap: 4px;
+	display: flex;
+	flex-direction: row;
+}
+
+.helpTextLayout {
+	/* This item isn't allowed to shrink! */
+	flex-shrink: 0;
+}
+
+.helpTextLayoutStickyBox {
+	top: 20px;
+	position: sticky;
+}
+
+.helpTextVerticalLine {
+	/* This item isn't allowed to shrink! */
+	flex-shrink: 0;
+	width: 1px;
+	background-color: black;
+}
+
+.textColumn {
+	display: flex;
+	flex-direction: column;
+	max-width: 600px;
+}
+
+.textSection {
+	padding-left: 2px;
+	border-left: 4px solid white;
+	cursor: pointer;
+}
+
+.selected {
+	border-left: 4px solid steelblue;
+	background-color: #eee;
+}
+
+.selected .tag {
+	display: inline-block;
+	background-color: lightblue;
+	border: 1px solid steelblue;
+	border-radius: 2px;
+	padding: 1px;
+}
+
+.selected .block {
+	display: inline-block;
+	background-color: lightgray;
+	border: 1px solid gray;
+	border-radius: 2px;
+	padding: 1px;
+}
