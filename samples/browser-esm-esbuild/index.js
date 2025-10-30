@@ -1,4 +1,5 @@
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.main.js';
+import 'monaco-editor/ragged-blocks';
 
 self.MonacoEnvironment = {
 	getWorkerUrl: function (moduleId, label) {
@@ -40,7 +41,7 @@ editor.addOverlayWidget(rockOverlay);
 let rockZoneIds = [];
 let rockDecorationIds = [];
 
-// --- Combined update function for all three rock experiments ---
+// --- Combined update function for all three rock components ---
 function updateAllRocks() {
 	const model = editor.getModel();
 	if (!model) return;
@@ -138,7 +139,7 @@ setTimeout(() => {
 const style = document.createElement('style');
 style.textContent = `
 	.monaco-editor .rock-decoration::before {
-		content: '🪨';
+		content: '';
 		margin-left: 6px;
 		margin-right: 6px;
 		font-size: 16px;
