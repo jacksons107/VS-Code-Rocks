@@ -1,4 +1,5 @@
-import * as rb from 'ragged-blocks';
+// import * as rb from 'ragged-blocks';
+import * as rb from '../src';
 import { WorkerMsg, WorkerReponse } from './layout-worker-message';
 
 export type RenderSettings = {

@@ -5,6 +5,7 @@
 		"serve": "webpack serve --open"
 	},
 	"dependencies": {
+		"@sbcohen/containers": "^1.0.1",
 		"monaco-editor": "file:../../"
 	},
 	"devDependencies": {

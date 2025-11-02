@@ -1,4 +1,5 @@
-import * as rb from 'ragged-blocks';
+// import * as rb from 'ragged-blocks';
+import * as rb from '../src';
 
 export type RenderSettings = {
 	renderDistanceMesh?: boolean;

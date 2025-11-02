@@ -622,7 +622,8 @@ export class RocksLayoutWithPins implements alt.Layout {
 		const objective: LP['objective'] = {
 			direction: glpk.GLP_MIN,
 			name: 'obj',
-			vars: [...allPinIds.values().map((id) => ({ name: id, coef: 1 }))]
+			// vars: [...allPinIds.values().map((id) => ({ name: id, coef: 1 }))]
+			vars: Array.from(allPinIds, (id: string) => ({ name: id, coef: 1 }))
 		};
 
 		/**
