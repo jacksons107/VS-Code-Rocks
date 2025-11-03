@@ -3,8 +3,8 @@ import * as monaco from 'monaco-editor';
 import './index.css';
 import { LayoutTree } from '../../src/layout-tree';
 import layout, { RenderSettings } from '../../demo/layout';
-// import * as rb from '../../src/';
-import { RocksLayoutSettings } from '../../src/rocks-layout/layout';
+import * as rb from '../../src/';
+import { OutlinedRocksLayoutSettings, RocksLayoutSettings } from '../../src/rocks-layout/layout';
 import { measureLayoutTree } from '../../src/layout-tree';
 
 // @ts-ignore
@@ -26,9 +26,14 @@ self.MonacoEnvironment = {
 	}
 };
 
+// const editor = monaco.editor.create(document.body, {
+// 	value: ['function x() {', '\tconsole.log("Hello world!");', '}'].join('\n'),
+// 	language: 'typescript'
+// });
+
 const editor = monaco.editor.create(document.body, {
-	value: ['function x() {', '\tconsole.log("Hello world!");', '}'].join('\n'),
-	language: 'typescript'
+	value: ['def add(x, y):', '\treturn x + y'].join('\n'),
+	language: 'python'
 });
 
 // Step 1: Create the overlay DOM node
@@ -192,6 +197,9 @@ const tree: LayoutTree = {
 	]
 };
 
+rb.removePadding(tree);
+rb.randomizeFillColors(tree);
+
 // Step 1: Measure tree
 const measured = measureLayoutTree(tree, (text) => {
 	const width = text.length * 8;
@@ -200,7 +208,8 @@ const measured = measureLayoutTree(tree, (text) => {
 });
 
 // Step 2: Create algorithm and render settings
-const algoSettings = new RocksLayoutSettings(true, 10);
+// const algoSettings = new RocksLayoutSettings(true, 10);
+const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
 
 const renderSettings = <RenderSettings>{
 	renderDistanceMesh: false,
@@ -208,7 +217,7 @@ const renderSettings = <RenderSettings>{
 };
 
 // Step 3: Run layout
-layout(measured, 'L1S', algoSettings, renderSettings, false)
+layout(measured, 'L1S+', algoSettings, renderSettings, false)
 	.then((result) => {
 		if (result.status === 'done') {
 			console.log('Layout duration:', result.duration, 'ms');

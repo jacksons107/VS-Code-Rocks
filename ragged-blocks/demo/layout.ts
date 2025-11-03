@@ -140,7 +140,10 @@ export default async function layout<A extends rb.AlgorithmName>(
 							text.fontFamily('Inconsolata-Medium');
 							text.fontSize('12px');
 							text.fill(atom.sty.color);
-							text.move(frag.rect.left, frag.rect.top - atom.rect.top);
+							// Added this because rectangles were rendering lower than text, might end up reverting to original
+							// text.move(frag.rect.left, frag.rect.top - atom.rect.top);
+							const fontSize = 12;
+							text.move(frag.rect.left, frag.rect.top + fontSize * 0.8);
 						}
 					}
 
