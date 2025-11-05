@@ -36,7 +36,7 @@ const editor = monaco.editor.create(document.body, {
 	language: 'python'
 });
 
-// Step 1: Create the overlay DOM node
+// // Step 1: Create the overlay DOM node
 // const rockRect = document.createElement('div');
 // rockRect.style.position = 'absolute';
 // rockRect.style.background = 'rgba(255, 255, 0, 0.2)';
@@ -165,67 +165,257 @@ const editor = monaco.editor.create(document.body, {
 // `;
 // document.head.appendChild(style);
 
-// --- Make a fake LayoutTree for `def add(x, y): return x + y`
-const tree: LayoutTree = {
-	type: 'Node',
-	padding: 4,
-	children: [
-		{ type: 'Atom', text: 'def' },
-		{ type: 'Spacer', text: ' ' },
-		{ type: 'Atom', text: 'add' },
-		{ type: 'Atom', text: '(' },
-		{ type: 'Atom', text: 'x' },
-		{ type: 'Atom', text: ',' },
-		{ type: 'Spacer', text: ' ' },
-		{ type: 'Atom', text: 'y' },
-		{ type: 'Atom', text: ')' },
-		{ type: 'Atom', text: ':' },
-		{ type: 'Newline' },
-		{
-			type: 'Node',
-			padding: 2,
-			children: [
-				{ type: 'Atom', text: 'return' },
-				{ type: 'Spacer', text: ' ' },
-				{ type: 'Atom', text: 'x' },
-				{ type: 'Spacer', text: ' ' },
-				{ type: 'Atom', text: '+' },
-				{ type: 'Spacer', text: ' ' },
-				{ type: 'Atom', text: 'y' }
-			]
+// ----- Layout Stuff -----
+
+async function extractFragmentsFromLayout(
+	measuredTree: rb.LayoutTree<rb.WithMeasurements>,
+	algoName: any,
+	algoSettings: rb.Settings<any>
+) {
+	const atomsIter = rb.eachAtomWithInheritedStyles(measuredTree);
+	const algo = rb.constructAlgoByName(algoName, algoSettings);
+	const layoutResult = await algo.layout(measuredTree);
+	const fragments: {
+		text: string;
+		rect: rb.Rect;
+		color?: string;
+		atom?: rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
+	}[] = [];
+
+	for (const frag of layoutResult.fragmentsInfo()) {
+		const atom = atomsIter.next().value as rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
+
+		console.log(
+			`${frag.text}: left=${frag.rect.left}, top=${frag.rect.top},
+				right=${frag.rect.right}, bottom=${frag.rect.bottom}`
+		);
+
+		fragments.push({
+			text: frag.text,
+			rect: frag.rect,
+			color: atom?.sty?.color,
+			atom
+		});
+	}
+
+	return fragments;
+}
+
+function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragments: any[]) {
+	const model = editor.getModel();
+	if (!model) return [];
+
+	const languageId = model.getLanguageId();
+	const allTokens: { text: string; range: monaco.Range }[] = [];
+
+	console.group('Collecting Tokens');
+	// Collect all tokens from all lines, in order
+	for (let line = 1; line <= model.getLineCount(); line++) {
+		const content = model.getLineContent(line);
+		const tokens = monaco.editor.tokenize(content, languageId)[0];
+		if (!tokens) continue;
+
+		for (let i = 0; i < tokens.length; i++) {
+			const start = tokens[i].offset + 1;
+			const end = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
+			const text = content.slice(start - 1, end - 1);
+
+			allTokens.push({
+				text,
+				range: new monaco.Range(line, start, line, end)
+			});
+
+			console.log(text);
 		}
-	]
-};
+	}
+	console.groupEnd();
 
-rb.removePadding(tree);
-rb.randomizeFillColors(tree);
+	// Now zip tokens ↔ fragments (1:1, in order)
+	const minLen = Math.min(allTokens.length, fragments.length);
+	const mapped = [];
 
-// Step 1: Measure tree
-const measured = measureLayoutTree(tree, (text) => {
-	const width = text.length * 8;
-	const height = 16;
-	return { left: 0, top: 0, right: width, bottom: height };
-});
+	for (let i = 0; i < minLen; i++) {
+		const frag = fragments[i];
+		const tok = allTokens[i];
 
-// Step 2: Create algorithm and render settings
-// const algoSettings = new RocksLayoutSettings(true, 10);
-const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
+		mapped.push({
+			frag,
+			range: tok.range
+		});
+	}
 
-const renderSettings = <RenderSettings>{
-	renderDistanceMesh: false,
-	renderFragmentBoundingBoxes: false
-};
+	// --- Debug visibility ---
+	console.group('Fragment ↔ Token Mapping');
+	for (let i = 0; i < mapped.length; i++) {
+		const m = mapped[i];
+		console.log(
+			`#${i}: "${m.frag.text}" ↔ line ${m.range.startLineNumber}, col ${m.range.startColumn}`,
+			m.frag.rect
+		);
+	}
+	console.groupEnd();
 
-// Step 3: Run layout
-layout(measured, 'L1S+', algoSettings, renderSettings, false)
-	.then((result) => {
-		if (result.status === 'done') {
-			console.log('Layout duration:', result.duration, 'ms');
-			const svgContainer = document.createElement('div');
-			svgContainer.innerHTML = result.svgSrc;
-			document.body.appendChild(svgContainer);
-		} else {
-			console.error('Layout failed:', result);
+	return mapped;
+}
+
+function applyFragmentDecorations(
+	editor: monaco.editor.IStandaloneCodeEditor,
+	mapped: { frag: any; range: monaco.Range }[]
+) {
+	const model = editor.getModel();
+	if (!model) return;
+
+	const decorations = mapped.map(({ frag, range }) => {
+		const x = frag.rect.left;
+		const y = frag.rect.top;
+		const color = frag.color || 'rgba(0, 150, 255, 0.2)';
+
+		return {
+			range,
+			options: {
+				inlineClassName: 'rb-inline-decoration',
+				before: {
+					content: '',
+					inlineClassName: 'rb-spacer',
+					// Translate layout coordinates into margin/padding
+					// (you can tune these constants experimentally)
+					margin: `0 0 0 ${x}px`
+				},
+				// Optional background highlight showing the fragment box
+				inlineClassNameAffectsLetterSpacing: false
+				// inlineClassName: 'rb-fragment-box'
+			}
+		};
+	});
+
+	console.group('Applying decorations');
+	for (const d of decorations) {
+		console.log(
+			d.range.toString(),
+			d.options.inlineClassName,
+			d.options.inlineClassNameAffectsLetterSpacing
+		);
+	}
+	console.groupEnd();
+
+	model.deltaDecorations([], decorations);
+}
+
+let currentDecorations: string[] = [];
+let currentSvgOverlay: HTMLDivElement | null = null;
+
+async function updateRaggedBlocks() {
+	console.group('🔄 RaggedBlocks Update');
+
+	const model = editor.getModel();
+	if (!model) return;
+
+	// Step 1: Extract current editor text
+	const source = model.getValue();
+	console.log('Source:', source);
+
+	// TODO: replace this with a real parser → LayoutTree from Monaco tokens
+	// For now we’re still using the static LayoutTree for testing.
+	const tree: LayoutTree = {
+		type: 'Node',
+		padding: 4,
+		children: [
+			{ type: 'Atom', text: 'def' },
+			{ type: 'Spacer', text: ' ' },
+			{ type: 'Atom', text: 'add' },
+			{ type: 'Atom', text: '(' },
+			{ type: 'Atom', text: 'x' },
+			{ type: 'Atom', text: ',' },
+			{ type: 'Spacer', text: ' ' },
+			{ type: 'Atom', text: 'y' },
+			{ type: 'Atom', text: ')' },
+			{ type: 'Atom', text: ':' },
+			{ type: 'Newline' },
+			{
+				type: 'Node',
+				padding: 2,
+				children: [
+					{ type: 'Atom', text: 'return' },
+					{ type: 'Spacer', text: ' ' },
+					{ type: 'Atom', text: 'x' },
+					{ type: 'Spacer', text: ' ' },
+					{ type: 'Atom', text: '+' },
+					{ type: 'Spacer', text: ' ' },
+					{ type: 'Atom', text: 'y' }
+				]
+			}
+		]
+	};
+
+	rb.removePadding(tree);
+	rb.randomizeFillColors(tree);
+
+	// Step 2: Measure
+	const measured = measureLayoutTree(tree, (text) => {
+		const width = text.length * 8;
+		const height = 16;
+		return { left: 0, top: 0, right: width, bottom: height };
+	});
+
+	// Step 3: Run layout
+	const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
+	const renderSettings = <RenderSettings>{
+		renderDistanceMesh: false,
+		renderFragmentBoundingBoxes: false
+	};
+	const algoName = 'L1S+';
+
+	let result;
+	try {
+		result = await layout(measured, algoName, algoSettings, renderSettings, false);
+		console.log('Layout done:', result.status);
+	} catch (e) {
+		console.error('Layout error:', e);
+		return;
+	}
+
+	// Step 4: Extract fragments and map to tokens
+	const fragments = await extractFragmentsFromLayout(measured, algoName, algoSettings);
+	const mapped = mapFragmentsToTokens(editor, fragments);
+
+	// Step 5: Clear and reapply decorations
+	const modelDecorations = mapped.map(({ frag, range }) => ({
+		range,
+		options: {
+			inlineClassName: 'rb-inline-decoration',
+			before: {
+				content: '',
+				inlineClassName: 'rb-spacer',
+				margin: `0 0 0 ${frag.rect.left}px`
+			}
 		}
-	})
-	.catch((err) => console.error('Layout error:', err));
+	}));
+
+	currentDecorations = model.deltaDecorations(currentDecorations, modelDecorations);
+	console.log('Applied decorations:', currentDecorations.length);
+
+	// Step 6: Overlay SVG
+	// if (result.status === 'done') {
+	// 	if (currentSvgOverlay) currentSvgOverlay.remove();
+
+	// 	currentSvgOverlay = document.createElement('div');
+	// 	currentSvgOverlay.style.position = 'absolute';
+	// 	currentSvgOverlay.style.top = '0';
+	// 	currentSvgOverlay.style.left = '0';
+	// 	currentSvgOverlay.style.pointerEvents = 'none';
+	// 	currentSvgOverlay.style.zIndex = '50';
+	// 	currentSvgOverlay.innerHTML = result.svgSrc;
+
+	// 	document.body.appendChild(currentSvgOverlay);
+	// }
+
+	console.groupEnd();
+}
+
+// Automatically update on editor content or layout changes
+editor.onDidChangeModelContent(() => requestAnimationFrame(updateRaggedBlocks));
+editor.onDidLayoutChange(() => requestAnimationFrame(updateRaggedBlocks));
+editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
+
+// Kick off the first run after editor init
+setTimeout(() => updateRaggedBlocks(), 200);
