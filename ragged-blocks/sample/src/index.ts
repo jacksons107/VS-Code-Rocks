@@ -258,6 +258,10 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 	return mapped;
 }
 
+// Keep this global near the top of your file
+let currentDecorations: string[] = [];
+let styleEl: HTMLStyleElement | null = null;
+
 function applyFragmentDecorations(
 	editor: monaco.editor.IStandaloneCodeEditor,
 	mapped: { frag: any; range: monaco.Range }[]
@@ -265,7 +269,7 @@ function applyFragmentDecorations(
 	const model = editor.getModel();
 	if (!model) return;
 
-	// 1️⃣ Build the decoration objects
+	// 1️⃣ Build decoration objects
 	const decorations = mapped.map(({ frag, range }) => ({
 		range,
 		options: {
@@ -277,32 +281,35 @@ function applyFragmentDecorations(
 		}
 	}));
 
-	// 2️⃣ Clear and apply new decorations
-	model.deltaDecorations([], decorations);
+	// 2️⃣ Replace existing decorations instead of adding new ones
+	currentDecorations = model.deltaDecorations(currentDecorations, decorations);
 
-	// 3️⃣ Inject CSS rules for spacing
-	const styleElId = 'rb-spacer-style';
-	let styleEl = document.getElementById(styleElId) as HTMLStyleElement | null;
+	// 3️⃣ Only create & populate style element once
 	if (!styleEl) {
 		styleEl = document.createElement('style');
-		styleEl.id = styleElId;
+		styleEl.id = 'rb-spacer-style';
 		document.head.appendChild(styleEl);
+		styleEl.textContent = `
+			.monaco-editor .rb-spacer {
+				display: inline-block;
+				width: var(--rb-offset, 0px);
+				user-select: none;
+				pointer-events: none;
+			}
+			.monaco-editor .rb-inline-decoration {
+				display: inline-block;
+				position: relative;
+			}
+		`;
 	}
-	styleEl.textContent = `
-		.monaco-editor .rb-spacer {
-			display: inline-block;
-			width: var(--rb-offset, 0px);
-			user-select: none;
-			pointer-events: none;
-		}
-		.monaco-editor .rb-inline-decoration {
-			display: inline-block;
-			position: relative;
-		}
-	`;
 
-	// 4️⃣ Add per-fragment width rules
+	// 4️⃣ Clear any existing per-fragment rules to prevent accumulation
 	const sheet = styleEl.sheet as CSSStyleSheet;
+	while (sheet.cssRules.length > 2) {
+		sheet.deleteRule(2);
+	}
+
+	// 5️⃣ Add new per-fragment width rules
 	for (const { frag } of mapped) {
 		const safe = CSS.escape(frag.text);
 		sheet.insertRule(
@@ -311,11 +318,11 @@ function applyFragmentDecorations(
 		);
 	}
 
-	console.log('Applied decorations with real spacers:', mapped.length);
+	console.log('Applied decorations (total):', currentDecorations.length);
 }
 
-let currentDecorations: string[] = [];
-let currentSvgOverlay: HTMLDivElement | null = null;
+// let currentDecorations: string[] = [];
+// let currentSvgOverlay: HTMLDivElement | null = null;
 
 async function updateRaggedBlocks() {
 	console.group('🔄 RaggedBlocks Update');
@@ -392,19 +399,6 @@ async function updateRaggedBlocks() {
 	const mapped = mapFragmentsToTokens(editor, fragments);
 
 	// Step 5: Clear and reapply decorations
-	// const modelDecorations = mapped.map(({ frag, range }) => ({
-	// 	range,
-	// 	options: {
-	// 		beforeContentClassName: `rb-spacer-${frag.text}-${frag.rect.left}`,
-	// 		before: {
-	// 			content: '\u00A0',
-	// 			inlineClassName: 'rb-spacer-inline'
-	// 			// margin: `0 0 0 ${frag.rect.left}px`
-	// 		},
-	// 		inlineClassName: `rb-inline-decoration-${frag.text}`
-	// 	}
-	// }));
-
 	applyFragmentDecorations(editor, mapped);
 
 	// currentDecorations = model.deltaDecorations(currentDecorations, modelDecorations);
