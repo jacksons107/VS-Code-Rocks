@@ -122,14 +122,14 @@ const editor = monaco.editor.create(document.body, {
 // 		for (let i = 0; i < tokens.length; i++) {
 // 			const endCol = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
 
-// 			newDecorations.push({
-// 				range: new monaco.Range(line, endCol, line, endCol),
-// 				options: {
-// 					beforeContentClassName: 'rock-decoration',
-// 					before: {
-// 						content: '🪨'
-// 					}
-// 				}
+// newDecorations.push({
+// 	range: new monaco.Range(line, endCol, line, endCol),
+// 	options: {
+// 		beforeContentClassName: 'rock-decoration',
+// 		before: {
+// 			content: '🪨'
+// 		}
+// 	}
 // 			});
 // 		}
 // 	}
@@ -265,40 +265,53 @@ function applyFragmentDecorations(
 	const model = editor.getModel();
 	if (!model) return;
 
-	const decorations = mapped.map(({ frag, range }) => {
-		const x = frag.rect.left;
-		const y = frag.rect.top;
-		const color = frag.color || 'rgba(0, 150, 255, 0.2)';
-
-		return {
-			range,
-			options: {
-				inlineClassName: 'rb-inline-decoration',
-				before: {
-					content: '',
-					inlineClassName: 'rb-spacer',
-					// Translate layout coordinates into margin/padding
-					// (you can tune these constants experimentally)
-					margin: `0 0 0 ${x}px`
-				},
-				// Optional background highlight showing the fragment box
-				inlineClassNameAffectsLetterSpacing: false
-				// inlineClassName: 'rb-fragment-box'
+	// 1️⃣ Build the decoration objects
+	const decorations = mapped.map(({ frag, range }) => ({
+		range,
+		options: {
+			inlineClassName: `rb-inline-decoration rb-inline-decoration-${frag.text}`,
+			beforeContentClassName: `rb-spacer rb-spacer-${frag.text}`,
+			before: {
+				content: '\u00A0' // real inline space that affects layout
 			}
-		};
-	});
+		}
+	}));
 
-	console.group('Applying decorations');
-	for (const d of decorations) {
-		console.log(
-			d.range.toString(),
-			d.options.inlineClassName,
-			d.options.inlineClassNameAffectsLetterSpacing
+	// 2️⃣ Clear and apply new decorations
+	model.deltaDecorations([], decorations);
+
+	// 3️⃣ Inject CSS rules for spacing
+	const styleElId = 'rb-spacer-style';
+	let styleEl = document.getElementById(styleElId) as HTMLStyleElement | null;
+	if (!styleEl) {
+		styleEl = document.createElement('style');
+		styleEl.id = styleElId;
+		document.head.appendChild(styleEl);
+	}
+	styleEl.textContent = `
+		.monaco-editor .rb-spacer {
+			display: inline-block;
+			width: var(--rb-offset, 0px);
+			user-select: none;
+			pointer-events: none;
+		}
+		.monaco-editor .rb-inline-decoration {
+			display: inline-block;
+			position: relative;
+		}
+	`;
+
+	// 4️⃣ Add per-fragment width rules
+	const sheet = styleEl.sheet as CSSStyleSheet;
+	for (const { frag } of mapped) {
+		const safe = CSS.escape(frag.text);
+		sheet.insertRule(
+			`.monaco-editor .rb-spacer-${safe} { --rb-offset: ${frag.rect.left}px !important; }`,
+			sheet.cssRules.length
 		);
 	}
-	console.groupEnd();
 
-	model.deltaDecorations([], decorations);
+	console.log('Applied decorations with real spacers:', mapped.length);
 }
 
 let currentDecorations: string[] = [];
@@ -379,19 +392,22 @@ async function updateRaggedBlocks() {
 	const mapped = mapFragmentsToTokens(editor, fragments);
 
 	// Step 5: Clear and reapply decorations
-	const modelDecorations = mapped.map(({ frag, range }) => ({
-		range,
-		options: {
-			inlineClassName: 'rb-inline-decoration',
-			before: {
-				content: '',
-				inlineClassName: 'rb-spacer',
-				margin: `0 0 0 ${frag.rect.left}px`
-			}
-		}
-	}));
+	// const modelDecorations = mapped.map(({ frag, range }) => ({
+	// 	range,
+	// 	options: {
+	// 		beforeContentClassName: `rb-spacer-${frag.text}-${frag.rect.left}`,
+	// 		before: {
+	// 			content: '\u00A0',
+	// 			inlineClassName: 'rb-spacer-inline'
+	// 			// margin: `0 0 0 ${frag.rect.left}px`
+	// 		},
+	// 		inlineClassName: `rb-inline-decoration-${frag.text}`
+	// 	}
+	// }));
 
-	currentDecorations = model.deltaDecorations(currentDecorations, modelDecorations);
+	applyFragmentDecorations(editor, mapped);
+
+	// currentDecorations = model.deltaDecorations(currentDecorations, modelDecorations);
 	console.log('Applied decorations:', currentDecorations.length);
 
 	// Step 6: Overlay SVG
