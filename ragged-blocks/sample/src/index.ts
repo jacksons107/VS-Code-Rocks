@@ -6,6 +6,7 @@ import layout, { RenderSettings } from '../../demo/layout';
 import * as rb from '../../src/';
 import { OutlinedRocksLayoutSettings, RocksLayoutSettings } from '../../src/rocks-layout/layout';
 import { measureLayoutTree } from '../../src/layout-tree';
+import parseExample from '../../demo/example-parser';
 
 // @ts-ignore
 self.MonacoEnvironment = {
@@ -31,8 +32,20 @@ self.MonacoEnvironment = {
 // 	language: 'typescript'
 // });
 
+/*
+pairs = [(i, j)
+			for i in range(0, 10)
+			for j in range(0, 10)
+			if i != j]
+*/
 const editor = monaco.editor.create(document.body, {
-	value: ['def add(x, y):', '\treturn x + y'].join('\n'),
+	value: [
+		'pairs =',
+		'\t[(i, j)',
+		'\tfor i in range(0, 10)',
+		'\tfor j in range(0, 10)',
+		'\tif i != j]'
+	].join('\n'),
 	language: 'python'
 });
 
@@ -110,32 +123,32 @@ const editor = monaco.editor.create(document.body, {
 // 		}
 // 	});
 
-// 	// 3. Update token decorations (rocks between tokens)
-// 	const newDecorations = [];
+// // 3. Update token decorations (rocks between tokens)
+// const newDecorations = [];
 
-// 	for (let line = 1; line <= lineCount; line++) {
-// 		const content = model.getLineContent(line);
-// 		const tokens = monaco.editor.tokenize(content, model.getLanguageId())[0];
+// for (let line = 1; line <= lineCount; line++) {
+// 	const content = model.getLineContent(line);
+// 	const tokens = monaco.editor.tokenize(content, model.getLanguageId())[0];
 
-// 		if (!tokens || tokens.length === 0) continue;
+// 	if (!tokens || tokens.length === 0) continue;
 
-// 		for (let i = 0; i < tokens.length; i++) {
-// 			const endCol = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
+// 	for (let i = 0; i < tokens.length; i++) {
+// 		const endCol = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
 
-// newDecorations.push({
-// 	range: new monaco.Range(line, endCol, line, endCol),
-// 	options: {
-// 		beforeContentClassName: 'rock-decoration',
-// 		before: {
-// 			content: '🪨'
-// 		}
+// 		newDecorations.push({
+// 			range: new monaco.Range(line, endCol, line, endCol),
+// 			options: {
+// 				beforeContentClassName: 'rock-decoration',
+// 				before: {
+// 					content: '🪨'
+// 				}
+// 			}
+// 		});
 // 	}
-// 			});
-// 		}
-// 	}
+// }
 
-// 	// Apply decorations
-// 	rockDecorationIds = model.deltaDecorations(rockDecorationIds, newDecorations);
+// // Apply decorations
+// rockDecorationIds = model.deltaDecorations(rockDecorationIds, newDecorations);
 // }
 
 // // --- Hook into editor events ---
@@ -182,6 +195,7 @@ async function extractFragmentsFromLayout(
 		atom?: rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
 	}[] = [];
 
+	console.group('Extract Fragments');
 	for (const frag of layoutResult.fragmentsInfo()) {
 		const atom = atomsIter.next().value as rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
 
@@ -197,6 +211,7 @@ async function extractFragmentsFromLayout(
 			atom
 		});
 	}
+	console.groupEnd();
 
 	return fragments;
 }
@@ -219,18 +234,19 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 			const start = tokens[i].offset + 1;
 			const end = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
 			const text = content.slice(start - 1, end - 1);
+			const range = new monaco.Range(line, start, line, end);
 
 			allTokens.push({
 				text,
-				range: new monaco.Range(line, start, line, end)
+				range: range
 			});
 
-			console.log(text);
+			console.log(text, range);
 		}
 	}
 	console.groupEnd();
 
-	// Now zip tokens ↔ fragments (1:1, in order)
+	// Now zip tokens and fragments (1:1, in order)
 	const minLen = Math.min(allTokens.length, fragments.length);
 	const mapped = [];
 
@@ -245,7 +261,7 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 	}
 
 	// --- Debug visibility ---
-	console.group('Fragment ↔ Token Mapping');
+	console.group('Fragment to Token Mapping');
 	for (let i = 0; i < mapped.length; i++) {
 		const m = mapped[i];
 		console.log(
@@ -258,9 +274,8 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 	return mapped;
 }
 
-// Keep this global near the top of your file
+// Global
 let currentDecorations: string[] = [];
-let styleEl: HTMLStyleElement | null = null;
 
 function applyFragmentDecorations(
 	editor: monaco.editor.IStandaloneCodeEditor,
@@ -269,63 +284,44 @@ function applyFragmentDecorations(
 	const model = editor.getModel();
 	if (!model) return;
 
-	// 1️⃣ Build decoration objects
-	const decorations = mapped.map(({ frag, range }) => ({
-		range,
-		options: {
-			inlineClassName: `rb-inline-decoration rb-inline-decoration-${frag.text}`,
-			beforeContentClassName: `rb-spacer rb-spacer-${frag.text}`,
-			before: {
-				content: '\u00A0' // real inline space that affects layout
+	const newDecorations = [];
+	let id = 0;
+	for (const { frag, range } of mapped) {
+		newDecorations.push({
+			range,
+			options: {
+				beforeContentClassName: `rb-spacer-${frag.text}-${id}`,
+				before: {
+					content: ''
+				}
 			}
-		}
-	}));
+		});
 
-	// 2️⃣ Replace existing decorations instead of adding new ones
-	currentDecorations = model.deltaDecorations(currentDecorations, decorations);
-
-	// 3️⃣ Only create & populate style element once
-	if (!styleEl) {
-		styleEl = document.createElement('style');
-		styleEl.id = 'rb-spacer-style';
-		document.head.appendChild(styleEl);
-		styleEl.textContent = `
-			.monaco-editor .rb-spacer {
-				display: inline-block;
-				width: var(--rb-offset, 0px);
+		const style = document.createElement('style');
+		style.textContent = `
+			.monaco-editor .rb-spacer-${frag.text}-${id}::before {
+				content: '';
+				margin-left: ${frag.rect.left}px;
+				margin-right: 0px;
+				font-size: 16px;
+				color: goldenrod;
 				user-select: none;
 				pointer-events: none;
 			}
-			.monaco-editor .rb-inline-decoration {
-				display: inline-block;
-				position: relative;
-			}
 		`;
+		document.head.appendChild(style);
+
+		id++;
 	}
 
-	// 4️⃣ Clear any existing per-fragment rules to prevent accumulation
-	const sheet = styleEl.sheet as CSSStyleSheet;
-	while (sheet.cssRules.length > 2) {
-		sheet.deleteRule(2);
-	}
-
-	// 5️⃣ Add new per-fragment width rules
-	for (const { frag } of mapped) {
-		const safe = CSS.escape(frag.text);
-		sheet.insertRule(
-			`.monaco-editor .rb-spacer-${safe} { --rb-offset: ${frag.rect.left}px !important; }`,
-			sheet.cssRules.length
-		);
-	}
+	// 2 Replace existing decorations instead of adding new ones
+	currentDecorations = model.deltaDecorations(currentDecorations, newDecorations);
 
 	console.log('Applied decorations (total):', currentDecorations.length);
 }
 
-// let currentDecorations: string[] = [];
-// let currentSvgOverlay: HTMLDivElement | null = null;
-
 async function updateRaggedBlocks() {
-	console.group('🔄 RaggedBlocks Update');
+	console.group('RaggedBlocks Update');
 
 	const model = editor.getModel();
 	if (!model) return;
@@ -334,38 +330,46 @@ async function updateRaggedBlocks() {
 	const source = model.getValue();
 	console.log('Source:', source);
 
-	// TODO: replace this with a real parser → LayoutTree from Monaco tokens
-	// For now we’re still using the static LayoutTree for testing.
-	const tree: LayoutTree = {
-		type: 'Node',
-		padding: 4,
-		children: [
-			{ type: 'Atom', text: 'def' },
-			{ type: 'Spacer', text: ' ' },
-			{ type: 'Atom', text: 'add' },
-			{ type: 'Atom', text: '(' },
-			{ type: 'Atom', text: 'x' },
-			{ type: 'Atom', text: ',' },
-			{ type: 'Spacer', text: ' ' },
-			{ type: 'Atom', text: 'y' },
-			{ type: 'Atom', text: ')' },
-			{ type: 'Atom', text: ':' },
-			{ type: 'Newline' },
-			{
-				type: 'Node',
-				padding: 2,
-				children: [
-					{ type: 'Atom', text: 'return' },
-					{ type: 'Spacer', text: ' ' },
-					{ type: 'Atom', text: 'x' },
-					{ type: 'Spacer', text: ' ' },
-					{ type: 'Atom', text: '+' },
-					{ type: 'Spacer', text: ' ' },
-					{ type: 'Atom', text: 'y' }
-				]
-			}
-		]
-	};
+	// TODO: replace this with a real parser
+	/*
+	pairs = [(i, j)
+				for i in range(0, 10)
+				for j in range(0, 10)
+				if i != j]
+	*/
+	const listCompExample = `
+							[pairs]@nm =
+							[\\[ [([i]@nm, [j]@nm)]@expr
+								[for [i]@nm in [range([0]@nm, [10]@nm)]@expr
+								[for [j]@nm in [range([0]@nm, [10]@nm)]@expr
+								[if [i]@nm != [j]@nm]@stmt]@stmt]@stmt \\]]@expr
+
+							@nm {
+							fill: #FAFA37;
+							border: 0 2;
+							}
+
+							@expr {
+							padding: 2;
+							fill: #FA9D5A;
+							border: 1 1 #D27D46;
+							border: 1 1 -1 #FFCBA4 top right;
+							}
+
+							@stmt {
+							padding: 2;
+							fill: gainsboro;
+							border: 1 1 gray;
+							border: 1 1 -1 white top right;
+							}`;
+
+	const tree = parseExample(listCompExample);
+	// console.log(compTree);
+	if (typeof tree === 'string') {
+		// Parse failed — `result` is an error message
+		console.error('Parse error:', tree);
+		throw new Error(tree);
+	}
 
 	rb.removePadding(tree);
 	rb.randomizeFillColors(tree);
@@ -389,6 +393,9 @@ async function updateRaggedBlocks() {
 	try {
 		result = await layout(measured, algoName, algoSettings, renderSettings, false);
 		console.log('Layout done:', result.status);
+		const svgContainer = document.createElement('div');
+		svgContainer.innerHTML = result.svgSrc;
+		document.body.appendChild(svgContainer);
 	} catch (e) {
 		console.error('Layout error:', e);
 		return;
@@ -401,31 +408,15 @@ async function updateRaggedBlocks() {
 	// Step 5: Clear and reapply decorations
 	applyFragmentDecorations(editor, mapped);
 
-	// currentDecorations = model.deltaDecorations(currentDecorations, modelDecorations);
 	console.log('Applied decorations:', currentDecorations.length);
-
-	// Step 6: Overlay SVG
-	// if (result.status === 'done') {
-	// 	if (currentSvgOverlay) currentSvgOverlay.remove();
-
-	// 	currentSvgOverlay = document.createElement('div');
-	// 	currentSvgOverlay.style.position = 'absolute';
-	// 	currentSvgOverlay.style.top = '0';
-	// 	currentSvgOverlay.style.left = '0';
-	// 	currentSvgOverlay.style.pointerEvents = 'none';
-	// 	currentSvgOverlay.style.zIndex = '50';
-	// 	currentSvgOverlay.innerHTML = result.svgSrc;
-
-	// 	document.body.appendChild(currentSvgOverlay);
-	// }
 
 	console.groupEnd();
 }
 
 // Automatically update on editor content or layout changes
-editor.onDidChangeModelContent(() => requestAnimationFrame(updateRaggedBlocks));
-editor.onDidLayoutChange(() => requestAnimationFrame(updateRaggedBlocks));
-editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
+// editor.onDidChangeModelContent(() => requestAnimationFrame(updateRaggedBlocks));
+// editor.onDidLayoutChange(() => requestAnimationFrame(updateRaggedBlocks));
+// editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
 
-// Kick off the first run after editor init
-setTimeout(() => updateRaggedBlocks(), 200);
+// // Kick off the first run after editor init
+// setTimeout(() => updateRaggedBlocks(), 200);

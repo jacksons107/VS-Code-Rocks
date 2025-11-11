@@ -1,5 +1,5 @@
 import Parsimmon from 'parsimmon';
-import { LayoutTree, Node, WithStyleRefs, SVGStyle, BorderStyle } from 'ragged-blocks';
+import { LayoutTree, Node, WithStyleRefs, SVGStyle, BorderStyle } from '../src';
 
 /**
  * Produce a parser which parses an escape character, then the given

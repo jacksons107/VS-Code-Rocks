@@ -6,7 +6,8 @@
 	},
 	"dependencies": {
 		"@sbcohen/containers": "^1.0.1",
-		"monaco-editor": "file:../../"
+		"monaco-editor": "file:../../",
+		"parsimmon": "^1.18.1"
 	},
 	"devDependencies": {
 		"css-loader": "^7.1.2",
