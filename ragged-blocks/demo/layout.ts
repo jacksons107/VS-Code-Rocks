@@ -142,9 +142,9 @@ export default async function layout<A extends rb.AlgorithmName>(
 							text.fontSize('12px');
 							text.fill(atom.sty.color);
 							// Added this because rectangles were rendering lower than text, might end up reverting to original
-							text.move(frag.rect.left, frag.rect.top - atom.rect.top);
-							// const fontSize = 12;
-							// text.move(frag.rect.left, frag.rect.top + fontSize * 0.8);
+							// text.move(frag.rect.left, frag.rect.top - atom.rect.top);
+							const fontSize = 12;
+							text.move(frag.rect.left, frag.rect.top + fontSize * 0.8);
 						}
 					}
 

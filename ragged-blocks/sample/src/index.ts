@@ -332,30 +332,30 @@ async function updateRaggedBlocks() {
 				if i != j]
 	*/
 	const listCompExample = `
-							[pairs]@nm =
-							[\\[ [([i]@nm, [j]@nm)]@expr
-								[for [i]@nm in [range([0]@nm, [10]@nm)]@expr
-								[for [j]@nm in [range([0]@nm, [10]@nm)]@expr
-								[if [i]@nm != [j]@nm]@stmt]@stmt]@stmt \\]]@expr
+[pairs]@nm =
+  [\\[ [([i]@nm, [j]@nm)]@expr
+     [for [i]@nm in [range([0]@nm, [10]@nm)]@expr
+     [for [j]@nm in [range([0]@nm, [10]@nm)]@expr
+     [if [i]@nm != [j]@nm]@stmt]@stmt]@stmt \\]]@expr
 
-							@nm {
-							fill: #FAFA37;
-							border: 0 2;
-							}
+@nm {
+  fill: #FAFA37;
+  border: 0 2;
+}
 
-							@expr {
-							padding: 2;
-							fill: #FA9D5A;
-							border: 1 1 #D27D46;
-							border: 1 1 -1 #FFCBA4 top right;
-							}
+@expr {
+  padding: 2;
+  fill: #FA9D5A;
+  border: 1 1 #D27D46;
+  border: 1 1 -1 #FFCBA4 top right;
+}
 
-							@stmt {
-							padding: 2;
-							fill: gainsboro;
-							border: 1 1 gray;
-							border: 1 1 -1 white top right;
-							}`;
+@stmt {
+  padding: 2;
+  fill: gainsboro;
+  border: 1 1 gray;
+  border: 1 1 -1 white top right;
+}`;
 
 	const tree = parseExample(listCompExample);
 	// console.log(compTree);
@@ -380,7 +380,7 @@ async function updateRaggedBlocks() {
 	const renderSettings = <RenderSettings>{
 		renderDistanceMesh: false,
 		renderFragmentBoundingBoxes: true,
-		renderText: false
+		renderText: true
 	};
 	const algoName = 'L1S+';
 
@@ -402,6 +402,7 @@ async function updateRaggedBlocks() {
 			svgContainer.style.left = '0px';
 			svgContainer.style.width = '100%';
 			svgContainer.style.height = '100%';
+			svgContainer.style.transform = 'translate(-9px, -8px)'; // adjust position
 			viewLines.prepend(svgContainer); // place SVG beneath text
 		}
 	} catch (e) {
