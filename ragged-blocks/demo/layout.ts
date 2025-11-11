@@ -5,6 +5,7 @@ import { WorkerMsg, WorkerReponse } from './layout-worker-message';
 export type RenderSettings = {
 	renderDistanceMesh?: boolean;
 	renderFragmentBoundingBoxes?: boolean;
+	renderText?: boolean;
 };
 
 export type LayoutResult =
@@ -141,9 +142,9 @@ export default async function layout<A extends rb.AlgorithmName>(
 							text.fontSize('12px');
 							text.fill(atom.sty.color);
 							// Added this because rectangles were rendering lower than text, might end up reverting to original
-							// text.move(frag.rect.left, frag.rect.top - atom.rect.top);
-							const fontSize = 12;
-							text.move(frag.rect.left, frag.rect.top + fontSize * 0.8);
+							text.move(frag.rect.left, frag.rect.top - atom.rect.top);
+							// const fontSize = 12;
+							// text.move(frag.rect.left, frag.rect.top + fontSize * 0.8);
 						}
 					}
 
@@ -162,7 +163,9 @@ export default async function layout<A extends rb.AlgorithmName>(
 					result = result.stack(new rb.FragmentBoundingBoxesRendering(layoutResult));
 				}
 
-				result = result.stack(text);
+				if (renderSettings.renderText) {
+					result = result.stack(text);
+				}
 
 				const svgSrc = rb.toSVG(result, 10);
 

@@ -1,5 +1,4 @@
 import * as monaco from 'monaco-editor';
-// import * as monaco from '../src';
 import './index.css';
 import { LayoutTree } from '../../src/layout-tree';
 import layout, { RenderSettings } from '../../demo/layout';
@@ -26,11 +25,6 @@ self.MonacoEnvironment = {
 		return './editor.worker.bundle.js';
 	}
 };
-
-// const editor = monaco.editor.create(document.body, {
-// 	value: ['function x() {', '\tconsole.log("Hello world!");', '}'].join('\n'),
-// 	language: 'typescript'
-// });
 
 /*
 pairs = [(i, j)
@@ -371,8 +365,8 @@ async function updateRaggedBlocks() {
 		throw new Error(tree);
 	}
 
-	rb.removePadding(tree);
-	rb.randomizeFillColors(tree);
+	// rb.removePadding(tree);
+	// rb.randomizeFillColors(tree);
 
 	// Step 2: Measure
 	const measured = measureLayoutTree(tree, (text) => {
@@ -385,7 +379,8 @@ async function updateRaggedBlocks() {
 	const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
 	const renderSettings = <RenderSettings>{
 		renderDistanceMesh: false,
-		renderFragmentBoundingBoxes: false
+		renderFragmentBoundingBoxes: true,
+		renderText: false
 	};
 	const algoName = 'L1S+';
 
@@ -395,7 +390,20 @@ async function updateRaggedBlocks() {
 		console.log('Layout done:', result.status);
 		const svgContainer = document.createElement('div');
 		svgContainer.innerHTML = result.svgSrc;
-		document.body.appendChild(svgContainer);
+		// document.body.appendChild(svgContainer);
+		const editorDom = editor.getDomNode();
+		const viewLines = editorDom?.querySelector('.view-lines');
+		if (viewLines) {
+			svgContainer.style.position = 'absolute';
+			svgContainer.style.pointerEvents = 'none';
+			svgContainer.style.zIndex = '0'; // below text layer
+			// svgContainer.style.opacity = '0.6';
+			svgContainer.style.top = '0px';
+			svgContainer.style.left = '0px';
+			svgContainer.style.width = '100%';
+			svgContainer.style.height = '100%';
+			viewLines.prepend(svgContainer); // place SVG beneath text
+		}
 	} catch (e) {
 		console.error('Layout error:', e);
 		return;
@@ -406,7 +414,7 @@ async function updateRaggedBlocks() {
 	const mapped = mapFragmentsToTokens(editor, fragments);
 
 	// Step 5: Clear and reapply decorations
-	applyFragmentDecorations(editor, mapped);
+	// applyFragmentDecorations(editor, mapped);
 
 	console.log('Applied decorations:', currentDecorations.length);
 
@@ -414,9 +422,9 @@ async function updateRaggedBlocks() {
 }
 
 // Automatically update on editor content or layout changes
-// editor.onDidChangeModelContent(() => requestAnimationFrame(updateRaggedBlocks));
-// editor.onDidLayoutChange(() => requestAnimationFrame(updateRaggedBlocks));
-// editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
+editor.onDidChangeModelContent(() => requestAnimationFrame(updateRaggedBlocks));
+editor.onDidLayoutChange(() => requestAnimationFrame(updateRaggedBlocks));
+editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
 
-// // Kick off the first run after editor init
-// setTimeout(() => updateRaggedBlocks(), 200);
+// Kick off the first run after editor init
+setTimeout(() => updateRaggedBlocks(), 200);
