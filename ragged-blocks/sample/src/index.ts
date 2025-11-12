@@ -35,10 +35,10 @@ pairs = [(i, j)
 const editor = monaco.editor.create(document.body, {
 	value: [
 		'pairs =',
-		'\t[(i, j)',
-		'\tfor i in range(0, 10)',
-		'\tfor j in range(0, 10)',
-		'\tif i != j]'
+		'[(i, j)',
+		'for i in range(0, 10)',
+		'for j in range(0, 10)',
+		'if i != j]'
 	].join('\n'),
 	language: 'python'
 });
@@ -230,38 +230,50 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 			const text = content.slice(start - 1, end - 1);
 			const range = new monaco.Range(line, start, line, end);
 
-			allTokens.push({
-				text,
-				range: range
-			});
-
-			console.log(text, range);
+			allTokens.push({ text, range });
+			console.log(`Token: "${text}"`, range);
 		}
 	}
 	console.groupEnd();
 
-	// Now zip tokens and fragments (1:1, in order)
-	const minLen = Math.min(allTokens.length, fragments.length);
-	const mapped = [];
+	// --- Now match fragments to tokens (handles ", " combined fragments) ---
+	const mapped: { frag: any; range: monaco.Range }[] = [];
+	let tokenIndex = 0;
 
-	for (let i = 0; i < minLen; i++) {
-		const frag = fragments[i];
-		const tok = allTokens[i];
-
-		mapped.push({
-			frag,
-			range: tok.range
-		});
-	}
-
-	// --- Debug visibility ---
 	console.group('Fragment to Token Mapping');
-	for (let i = 0; i < mapped.length; i++) {
-		const m = mapped[i];
-		console.log(
-			`#${i}: "${m.frag.text}" ↔ line ${m.range.startLineNumber}, col ${m.range.startColumn}`,
-			m.frag.rect
-		);
+	for (const frag of fragments) {
+		const fragText = frag.text;
+		let mergedText = '';
+		let startRange: monaco.Range | null = null;
+		let endRange: monaco.Range | null = null;
+
+		// Keep consuming tokens until we cover the full fragment text
+		while (tokenIndex < allTokens.length && mergedText.length < fragText.length) {
+			const tok = allTokens[tokenIndex];
+			mergedText += tok.text;
+
+			if (!startRange) startRange = tok.range;
+			endRange = tok.range;
+			tokenIndex++;
+
+			// Stop if merged text matches fragment text
+			if (mergedText === fragText) break;
+		}
+
+		if (startRange && endRange) {
+			const mergedRange = new monaco.Range(
+				startRange.startLineNumber,
+				startRange.startColumn,
+				endRange.endLineNumber,
+				endRange.endColumn
+			);
+			mapped.push({ frag, range: mergedRange });
+			console.log(
+				`"${frag.text}" ↔ line ${mergedRange.startLineNumber}, col ${mergedRange.startColumn}`
+			);
+		} else {
+			console.warn(`⚠️ Could not find token(s) for fragment "${frag.text}"`);
+		}
 	}
 	console.groupEnd();
 
@@ -280,11 +292,38 @@ function applyFragmentDecorations(
 
 	const newDecorations = [];
 	let id = 0;
-	for (const { frag, range } of mapped) {
+
+	// Compute average column width in Monaco
+	const fontInfo = (editor as any)._configuration?.fontInfo;
+	const columnWidth = fontInfo ? fontInfo.typicalHalfwidthCharacterWidth : 7;
+
+	console.group('Applying decorations');
+	// --- Compute spacer widths between fragments on the same line ---
+	for (let i = 0; i < mapped.length; i++) {
+		const current = mapped[i];
+		const next = mapped[i + 1];
+
+		// Width of token by characters
+		const numColumns = current.range.endColumn - current.range.startColumn;
+
+		// Width in layout space (from ragged-blocks)
+		const layoutWidth = current.frag.rect.right - current.frag.rect.left;
+
+		// Expected Monaco width (based on text)
+		const tokenTextWidth = numColumns * columnWidth;
+
+		// Spacer width = extra width needed to reach layout width
+		let spacerWidth = layoutWidth - tokenTextWidth;
+		if (spacerWidth < 0) spacerWidth = 0; // avoid negative spacing
+
+		console.log(`${current.frag.text}
+					Spacer width : ${spacerWidth}
+					numColumns : ${numColumns}
+					layoutWidth : ${layoutWidth}`);
 		newDecorations.push({
-			range,
+			range: current.range,
 			options: {
-				beforeContentClassName: `rb-spacer-${frag.text}-${id}`,
+				beforeContentClassName: `rb-spacer-${current.frag.text}-${id}`,
 				before: {
 					content: ''
 				}
@@ -293,10 +332,10 @@ function applyFragmentDecorations(
 
 		const style = document.createElement('style');
 		style.textContent = `
-			.monaco-editor .rb-spacer-${frag.text}-${id}::before {
+			.monaco-editor .rb-spacer-${current.frag.text}-${id}::before {
 				content: '';
-				margin-left: ${frag.rect.left}px;
-				margin-right: 0px;
+				margin-left: 0px;
+				margin-right: ${spacerWidth}px;
 				font-size: 16px;
 				color: goldenrod;
 				user-select: none;
@@ -304,7 +343,6 @@ function applyFragmentDecorations(
 			}
 		`;
 		document.head.appendChild(style);
-
 		id++;
 	}
 
@@ -312,6 +350,7 @@ function applyFragmentDecorations(
 	currentDecorations = model.deltaDecorations(currentDecorations, newDecorations);
 
 	console.log('Applied decorations (total):', currentDecorations.length);
+	console.groupEnd();
 }
 
 async function updateRaggedBlocks() {
@@ -380,7 +419,7 @@ async function updateRaggedBlocks() {
 	const renderSettings = <RenderSettings>{
 		renderDistanceMesh: false,
 		renderFragmentBoundingBoxes: true,
-		renderText: true
+		renderText: false
 	};
 	const algoName = 'L1S+';
 
@@ -415,7 +454,7 @@ async function updateRaggedBlocks() {
 	const mapped = mapFragmentsToTokens(editor, fragments);
 
 	// Step 5: Clear and reapply decorations
-	// applyFragmentDecorations(editor, mapped);
+	applyFragmentDecorations(editor, mapped);
 
 	console.log('Applied decorations:', currentDecorations.length);
 
