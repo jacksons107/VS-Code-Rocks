@@ -35,10 +35,10 @@ pairs = [(i, j)
 const editor = monaco.editor.create(document.body, {
 	value: [
 		'pairs =',
-		'[(i, j)',
+		'[ (i, j)',
 		'for i in range(0, 10)',
 		'for j in range(0, 10)',
-		'if i != j]'
+		'if i != j ]'
 	].join('\n'),
 	language: 'python'
 });
@@ -280,7 +280,7 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 	return mapped;
 }
 
-// Global
+// global
 let currentDecorations: string[] = [];
 
 function applyFragmentDecorations(
@@ -290,67 +290,105 @@ function applyFragmentDecorations(
 	const model = editor.getModel();
 	if (!model) return;
 
-	const newDecorations = [];
-	let id = 0;
-
-	// Compute average column width in Monaco
+	// Get approximate column width from editor (fallback to 7)
 	const fontInfo = (editor as any)._configuration?.fontInfo;
 	const columnWidth = fontInfo ? fontInfo.typicalHalfwidthCharacterWidth : 7;
 
+	const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
+	const cssRules: string[] = [];
+
 	console.group('Applying decorations');
-	// --- Compute spacer widths between fragments on the same line ---
+
 	for (let i = 0; i < mapped.length; i++) {
-		const current = mapped[i];
-		const next = mapped[i + 1];
+		const { frag, range } = mapped[i];
 
-		// Width of token by characters
-		const numColumns = current.range.endColumn - current.range.startColumn;
+		// basic token info
+		const startCol = range.startColumn;
+		const endCol = range.endColumn;
+		const numColumns = Math.max(0, endCol - startCol); // token length in columns
 
-		// Width in layout space (from ragged-blocks)
-		const layoutWidth = current.frag.rect.right - current.frag.rect.left;
-
-		// Expected Monaco width (based on text)
+		// layout widths from ragged-blocks
+		const layoutWidth = frag.rect.right - frag.rect.left;
 		const tokenTextWidth = numColumns * columnWidth;
 
-		// Spacer width = extra width needed to reach layout width
-		let spacerWidth = layoutWidth - tokenTextWidth;
-		if (spacerWidth < 0) spacerWidth = 0; // avoid negative spacing
+		// baseline approx X for this token (in layout/editor column pixels)
+		const tokenBaselineX = (startCol - 1) * columnWidth;
 
-		console.log(`${current.frag.text}
-					Spacer width : ${spacerWidth}
-					numColumns : ${numColumns}
-					layoutWidth : ${layoutWidth}`);
+		// if this is the first token on the line (column 1) or close to it,
+		// we need to account for left offset: frag.rect.left - tokenBaselineX
+		// (only positive offsets matter)
+		const extraLeft = Math.max(0, frag.rect.left - tokenBaselineX);
+
+		// compute spacer width: right spacer + possibly extra left shift for first token
+		let spacerWidth = layoutWidth - tokenTextWidth;
+		if (spacerWidth < 0) spacerWidth = 0;
+		// add left offset only when token is near start of line; you could
+		// decide threshold different than ==1 if needed
+		if (startCol === 1) {
+			spacerWidth += extraLeft;
+		}
+
+		// clamp
+		spacerWidth = Math.max(0, spacerWidth);
+
+		// class name for this spacer (unique per-decoration)
+		const className = `rb-spacer-${i}`;
+
+		// push decoration that creates a before pseudo-element (affects flow)
 		newDecorations.push({
-			range: current.range,
+			range,
 			options: {
-				beforeContentClassName: `rb-spacer-${current.frag.text}-${id}`,
-				before: {
-					content: ''
-				}
+				beforeContentClassName: className,
+				// prevent decoration from greedily growing while typing
+				stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
 			}
 		});
 
-		const style = document.createElement('style');
-		style.textContent = `
-			.monaco-editor .rb-spacer-${current.frag.text}-${id}::before {
+		// create CSS rule for this particular spacer
+		// using margin-right on ::before will put spacing between the pseudo element and token
+		// (we keep width:0 so we rely on margin to push, and background for debug)
+		const color = frag.color || 'rgba(0,150,255,0.12)';
+		cssRules.push(`
+			.monaco-editor .${className}::before {
 				content: '';
-				margin-left: 0px;
+				display: inline-block;
+				width: 0;
 				margin-right: ${spacerWidth}px;
-				font-size: 16px;
-				color: goldenrod;
+				margin-left: 0;
+				height: 1em;
+				background: ${color};
+				opacity: 0.35;
 				user-select: none;
 				pointer-events: none;
 			}
-		`;
-		document.head.appendChild(style);
-		id++;
+		`);
+
+		console.log(
+			`#${i} "${
+				frag.text
+			}" startCol=${startCol} numCols=${numColumns} layoutW=${layoutWidth.toFixed(
+				2
+			)} tokenW=${tokenTextWidth.toFixed(2)} extraLeft=${extraLeft.toFixed(
+				2
+			)} spacer=${spacerWidth.toFixed(2)}`
+		);
 	}
 
-	// 2 Replace existing decorations instead of adding new ones
+	console.groupEnd();
+
+	// replace old decorations
 	currentDecorations = model.deltaDecorations(currentDecorations, newDecorations);
 
-	console.log('Applied decorations (total):', currentDecorations.length);
-	console.groupEnd();
+	// update a single style element with all per-spacer rules
+	let styleEl = document.getElementById('rb-spacer-style') as HTMLStyleElement | null;
+	if (!styleEl) {
+		styleEl = document.createElement('style');
+		styleEl.id = 'rb-spacer-style';
+		document.head.appendChild(styleEl);
+	}
+	styleEl.textContent = cssRules.join('\n');
+
+	console.log('Applied decorations (count):', currentDecorations.length);
 }
 
 async function updateRaggedBlocks() {
