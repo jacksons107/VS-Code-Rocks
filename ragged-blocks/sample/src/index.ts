@@ -272,7 +272,7 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 				`"${frag.text}" ↔ line ${mergedRange.startLineNumber}, col ${mergedRange.startColumn}`
 			);
 		} else {
-			console.warn(`⚠️ Could not find token(s) for fragment "${frag.text}"`);
+			console.warn(`Could not find token(s) for fragment "${frag.text}"`);
 		}
 	}
 	console.groupEnd();
@@ -280,12 +280,62 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 	return mapped;
 }
 
+function computeLineSpacingFromFragments(fragments: any[]) {
+	if (!fragments.length) return [];
+
+	// --- Step 1: Group fragments by their vertical “line” level ---
+	// We’ll cluster fragments by their rect.top value (within a small epsilon).
+	const epsilon = 2; // tolerance in px for grouping fragments into same line
+	const lines: { top: number; bottom: number; frags: any[] }[] = [];
+
+	for (const frag of fragments) {
+		const { top, bottom } = frag.rect;
+		// Try to find an existing line group with similar top
+		let found = false;
+		for (const line of lines) {
+			if (Math.abs(line.top - top) < epsilon) {
+				line.frags.push(frag);
+				line.top = Math.min(line.top, top);
+				line.bottom = Math.max(line.bottom, bottom);
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			lines.push({ top, bottom, frags: [frag] });
+		}
+	}
+
+	// Sort lines top→bottom
+	lines.sort((a, b) => a.top - b.top);
+
+	// --- Step 2: Compute vertical gaps between consecutive lines ---
+	const verticalGaps: { lineIndex: number; gap: number }[] = [];
+
+	for (let i = 0; i < lines.length - 1; i++) {
+		const current = lines[i];
+		const next = lines[i + 1];
+		const gap = next.top - current.bottom;
+		verticalGaps.push({ lineIndex: i, gap });
+		console.log(
+			`Gap between line ${i} and ${i + 1}: ${gap.toFixed(2)}px (bottom=${current.bottom.toFixed(
+				1
+			)}, next.top=${next.top.toFixed(1)})`
+		);
+	}
+
+	console.log('Computed line vertical gaps:', verticalGaps);
+	return verticalGaps;
+}
+
 // global
 let currentDecorations: string[] = [];
+let currentViewZoneIds: string[] = [];
 
 function applyFragmentDecorations(
 	editor: monaco.editor.IStandaloneCodeEditor,
-	mapped: { frag: any; range: monaco.Range }[]
+	mapped: { frag: any; range: monaco.Range }[],
+	lineGaps: { lineIndex: number; gap: number }[]
 ) {
 	const model = editor.getModel();
 	if (!model) return;
@@ -296,9 +346,9 @@ function applyFragmentDecorations(
 
 	const newDecorations: monaco.editor.IModelDeltaDecoration[] = [];
 	const cssRules: string[] = [];
+	let lineHeights = [];
 
-	console.group('Applying decorations');
-
+	console.group('Horizontal Spacers');
 	for (let i = 0; i < mapped.length; i++) {
 		const { frag, range } = mapped[i];
 
@@ -323,7 +373,6 @@ function applyFragmentDecorations(
 		let spacerWidth = layoutWidth - tokenTextWidth;
 		if (spacerWidth < 0) spacerWidth = 0;
 		// add left offset only when token is near start of line; you could
-		// decide threshold different than ==1 if needed
 		if (startCol === 1) {
 			spacerWidth += extraLeft;
 		}
@@ -388,7 +437,37 @@ function applyFragmentDecorations(
 	}
 	styleEl.textContent = cssRules.join('\n');
 
-	console.log('Applied decorations (count):', currentDecorations.length);
+	console.log('Applied horizontal spacers (count):', currentDecorations.length);
+
+	console.group('Vertical Spacers');
+
+	// --- Apply view zones based on line gaps ---
+	editor.changeViewZones((accessor) => {
+		// Remove old zones first
+		for (const zid of currentViewZoneIds) accessor.removeZone(zid);
+		currentViewZoneIds = [];
+
+		for (const { lineIndex, gap } of lineGaps) {
+			if (gap <= 0) continue; // skip negative or zero gaps
+
+			const domNode = document.createElement('div');
+			domNode.style.height = `${gap - 1}px`;
+			domNode.style.pointerEvents = 'none';
+			domNode.style.userSelect = 'none';
+			// domNode.style.background = 'rgba(255, 215, 0, 0.1)'; // light gold tint to debug gaps
+
+			const zoneId = accessor.addZone({
+				afterLineNumber: lineIndex + 1, // Monaco lines are 1-indexed
+				heightInPx: gap - 1,
+				domNode
+			});
+
+			currentViewZoneIds.push(zoneId);
+			console.log(`Added view zone after line ${lineIndex + 1} (height ${gap}px)`);
+		}
+	});
+
+	console.groupEnd();
 }
 
 async function updateRaggedBlocks() {
@@ -456,7 +535,7 @@ async function updateRaggedBlocks() {
 	const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
 	const renderSettings = <RenderSettings>{
 		renderDistanceMesh: false,
-		renderFragmentBoundingBoxes: true,
+		renderFragmentBoundingBoxes: false,
 		renderText: false
 	};
 	const algoName = 'L1S+';
@@ -490,11 +569,10 @@ async function updateRaggedBlocks() {
 	// Step 4: Extract fragments and map to tokens
 	const fragments = await extractFragmentsFromLayout(measured, algoName, algoSettings);
 	const mapped = mapFragmentsToTokens(editor, fragments);
+	const lineGaps = computeLineSpacingFromFragments(fragments);
 
 	// Step 5: Clear and reapply decorations
-	applyFragmentDecorations(editor, mapped);
-
-	console.log('Applied decorations:', currentDecorations.length);
+	applyFragmentDecorations(editor, mapped, lineGaps);
 
 	console.groupEnd();
 }
