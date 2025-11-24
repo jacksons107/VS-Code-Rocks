@@ -7,6 +7,14 @@ import { OutlinedRocksLayoutSettings, RocksLayoutSettings } from '../../src/rock
 import { measureLayoutTree } from '../../src/layout-tree';
 import parseExample from '../../demo/example-parser';
 
+import { Parser, Language } from 'web-tree-sitter';
+
+// Initialize Tree Sitter Parser for Python
+await Parser.init();
+const parser = new Parser();
+const Python = await Language.load('../public/tree-sitter-python.wasm');
+parser.setLanguage(Python);
+
 // @ts-ignore
 self.MonacoEnvironment = {
 	getWorkerUrl: function (moduleId, label) {
@@ -42,135 +50,6 @@ const editor = monaco.editor.create(document.body, {
 	].join('\n'),
 	language: 'python'
 });
-
-// // Step 1: Create the overlay DOM node
-// const rockRect = document.createElement('div');
-// rockRect.style.position = 'absolute';
-// rockRect.style.background = 'rgba(255, 255, 0, 0.2)';
-// rockRect.style.border = '2px solid gold';
-// rockRect.style.borderRadius = '4px';
-// rockRect.style.pointerEvents = 'none';
-
-// // Step 2: Add overlay widget
-// const rockOverlay = {
-// 	getId: () => 'rock.dynamic.overlay',
-// 	getDomNode: () => rockRect,
-// 	getPosition: () => null
-// };
-// editor.addOverlayWidget(rockOverlay);
-
-// // --- Keep track of all active zones ---
-// let rockZoneIds = [];
-// let rockDecorationIds = [];
-
-// // --- Combined update function for all three rock components ---
-// function updateAllRocks() {
-// 	const model = editor.getModel();
-// 	if (!model) return;
-
-// 	const lineCount = model.getLineCount();
-
-// 	// 1. Update wrapper overlay (yellow box)
-// 	const startPos = new monaco.Position(1, 1);
-// 	const endPos = new monaco.Position(lineCount, model.getLineMaxColumn(lineCount));
-
-// 	const startCoords = editor.getScrolledVisiblePosition(startPos);
-// 	const endCoords = editor.getScrolledVisiblePosition(endPos);
-
-// 	if (startCoords && endCoords) {
-// 		const contentWidth = editor.getLayoutInfo().contentWidth;
-// 		const top = startCoords.top;
-// 		const height = endCoords.top + endCoords.height - startCoords.top;
-
-// 		rockRect.style.top = `${top}px`;
-// 		rockRect.style.left = `${startCoords.left}px`;
-// 		rockRect.style.width = `${contentWidth - 20}px`;
-// 		rockRect.style.height = `${height}px`;
-// 	}
-
-// 	// 2. Update ViewZones (rocks between lines)
-// 	editor.changeViewZones((accessor) => {
-// 		// Remove all existing zones
-// 		for (const id of rockZoneIds) {
-// 			accessor.removeZone(id);
-// 		}
-// 		rockZoneIds = [];
-
-// 		// Add one rock zone after each line
-// 		for (let line = 1; line <= lineCount; line++) {
-// 			const domNode = document.createElement('div');
-// 			domNode.textContent = '🪨';
-// 			domNode.style.textAlign = 'center';
-// 			domNode.style.lineHeight = '20px';
-// 			domNode.style.fontSize = '16px';
-// 			domNode.style.color = 'goldenrod';
-// 			domNode.style.userSelect = 'none';
-// 			domNode.style.pointerEvents = 'none';
-
-// 			const id = accessor.addZone({
-// 				afterLineNumber: line,
-// 				heightInPx: 20,
-// 				domNode
-// 			});
-
-// 			rockZoneIds.push(id);
-// 		}
-// 	});
-
-// // 3. Update token decorations (rocks between tokens)
-// const newDecorations = [];
-
-// for (let line = 1; line <= lineCount; line++) {
-// 	const content = model.getLineContent(line);
-// 	const tokens = monaco.editor.tokenize(content, model.getLanguageId())[0];
-
-// 	if (!tokens || tokens.length === 0) continue;
-
-// 	for (let i = 0; i < tokens.length; i++) {
-// 		const endCol = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
-
-// 		newDecorations.push({
-// 			range: new monaco.Range(line, endCol, line, endCol),
-// 			options: {
-// 				beforeContentClassName: 'rock-decoration',
-// 				before: {
-// 					content: '🪨'
-// 				}
-// 			}
-// 		});
-// 	}
-// }
-
-// // Apply decorations
-// rockDecorationIds = model.deltaDecorations(rockDecorationIds, newDecorations);
-// }
-
-// // --- Hook into editor events ---
-// editor.onDidScrollChange(updateAllRocks);
-// editor.onDidLayoutChange(updateAllRocks);
-// editor.onDidChangeModelContent(() => {
-// 	requestAnimationFrame(updateAllRocks);
-// });
-
-// // --- Initial render ---
-// setTimeout(() => {
-// 	updateAllRocks();
-// }, 100);
-
-// // --- Style for rock glyphs ---
-// const style = document.createElement('style');
-// style.textContent = `
-// 	.monaco-editor .rock-decoration::before {
-// 		content: '🪨';
-// 		margin-left: 6px;
-// 		margin-right: 6px;
-// 		font-size: 16px;
-// 		color: goldenrod;
-// 		user-select: none;
-// 		pointer-events: none;
-// 	}
-// `;
-// document.head.appendChild(style);
 
 // ----- Layout Stuff -----
 
@@ -479,6 +358,10 @@ async function updateRaggedBlocks() {
 	// Step 1: Extract current editor text
 	const source = model.getValue();
 	console.log('Source:', source);
+
+	// Tree sitter parse
+	const tsTree = parser.parse(source);
+	console.log('Tree-sitter AST:', tsTree.rootNode.toString());
 
 	// TODO: replace this with a real parser
 	/*

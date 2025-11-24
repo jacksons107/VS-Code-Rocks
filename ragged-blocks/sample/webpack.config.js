@@ -18,6 +18,11 @@ module.exports = {
 				__dirname,
 				'../../out/monaco-editor/esm/vs/editor/editor.main.js'
 			)
+		},
+		fallback: {
+			fs: false,
+			'fs/promises': false,
+			module: false
 		}
 	},
 	output: {
