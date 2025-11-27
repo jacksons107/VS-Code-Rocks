@@ -349,115 +349,158 @@ function applyFragmentDecorations(
 	console.groupEnd();
 }
 
-interface Token {
+/* ------------------------- Internal Types ------------------------- */
+
+export interface Token {
 	type: string;
 	text: string;
 	startIndex: number;
 	endIndex: number;
 }
 
-interface ASTNode {
+export interface ASTNode {
 	type: string;
 	startIndex: number;
 	endIndex: number;
-	astChildren: ASTNode[];
-	cstChildren: Array<ASTNode | Token>;
+	children: Array<ASTNode | Token>; // unified child list
 }
 
-/* ──────────────────────────────────────────────────────────────
- * Step 1 — Walk the tree and collect all leaf nodes (tokens)
- * ────────────────────────────────────────────────────────────── */
-function collectTokens(node, source, tokens = []) {
-	if (node.childCount === 0) {
-		tokens.push({
-			type: node.type,
-			text: source.slice(node.startIndex, node.endIndex),
-			startIndex: node.startIndex,
-			endIndex: node.endIndex
-			// isNamed: node.isNamed()
-		});
-	} else {
-		for (const child of node.children) {
-			collectTokens(child, source, tokens);
-		}
-	}
-	return tokens;
-}
+/* ----------------------- Collect All Tokens ----------------------- */
+/**
+ * This collects all leaf nodes (tokens) from the Tree-Sitter tree.
+ * We explicitly include anonymous tokens like "for", "in", "(", ")",
+ * punctuation, keywords, etc.
+ */
+export function collectTokens(node, source: string): Token[] {
+	const tokens: Token[] = [];
 
-/* ──────────────────────────────────────────────────────────────
- * Step 2 — Wrap Tree-sitter AST nodes into our structure
- * ────────────────────────────────────────────────────────────── */
-
-function wrapNode(tsNode): ASTNode {
-	return {
-		type: tsNode.type,
-		startIndex: tsNode.startIndex,
-		endIndex: tsNode.endIndex,
-		astChildren: tsNode.children.map(wrapNode),
-		cstChildren: [] // will be filled later
-	};
-}
-
-/* ──────────────────────────────────────────────────────────────
- * Step 3 — Token insertion based on interval containment
- * ────────────────────────────────────────────────────────────── */
-
-function tokenBelongs(node: ASTNode, tok: Token): boolean {
-	return node.startIndex <= tok.startIndex && tok.endIndex <= node.endIndex;
-}
-
-function insertToken(node: ASTNode, tok: Token): void {
-	// 1. Descend into AST children if the token fits in any of them
-	for (const child of node.astChildren) {
-		if (tokenBelongs(child, tok)) {
-			insertToken(child, tok);
-			return;
+	function walk(n) {
+		if (n.childCount === 0) {
+			tokens.push({
+				type: n.type,
+				text: source.slice(n.startIndex, n.endIndex),
+				startIndex: n.startIndex,
+				endIndex: n.endIndex
+			});
+		} else {
+			for (const c of n.children) walk(c);
 		}
 	}
 
-	// 2. Token does not fit in any children → it belongs here.
-	// Insert in sorted order by startIndex.
-	let i = 0;
-	while (i < node.cstChildren.length && node.cstChildren[i].startIndex <= tok.startIndex) {
-		i++;
-	}
-	node.cstChildren.splice(i, 0, tok);
+	walk(node);
+	return tokens.sort((a, b) => a.startIndex - b.startIndex);
 }
 
-/* ──────────────────────────────────────────────────────────────
- * Step 4 — Build the full CST
- * ────────────────────────────────────────────────────────────── */
+/* ---------------------- wrapNamedNodes (CST skeleton) ---------------------- */
+/**
+ * Using a TreeCursor, extract ONLY named nodes (like what toString() prints).
+ * Anonymous nodes are bypassed, but their named descendants bubble up.
+ *
+ * Returned value is an array because a subtree may contain multiple sibling
+ * named nodes. Usually the root will contain exactly one (python: "module").
+ */
+export function wrapNamedNodes(root): ASTNode[] {
+	const cursor = root.walk();
 
-function buildCST(rootNode, source: string): ASTNode {
+	function walk(cur): ASTNode[] {
+		const sn = cur.currentNode;
+		let childWrappers: ASTNode[] = [];
+
+		// descend into children
+		if (cur.gotoFirstChild()) {
+			do childWrappers.push(...walk(cur));
+			while (cur.gotoNextSibling());
+			cur.gotoParent();
+		}
+
+		// If node is named, create wrapper and attach named children
+		if (cur.nodeIsNamed) {
+			const node: ASTNode = {
+				type: sn.type,
+				startIndex: sn.startIndex,
+				endIndex: sn.endIndex,
+				children: [...childWrappers]
+			};
+			return [node];
+		}
+
+		// Anonymous → pass through children
+		return childWrappers;
+	}
+
+	return walk(cursor);
+}
+
+/* ----------------------- Token insertion logic ----------------------- */
+
+/** Insert into sorted array by startIndex. */
+function insertSorted(arr: Array<ASTNode | Token>, tok: Token): Array<ASTNode | Token> {
+	const idx = arr.findIndex((child) => child.startIndex > tok.startIndex);
+	if (idx === -1) arr.push(tok);
+	else arr.splice(idx, 0, tok);
+	return arr;
+}
+
+/**
+ * Insert token into the wrapper ASTNode:
+ * - If a child node fully contains the token range → descend.
+ * - Otherwise insert token into this node's children.
+ */
+export function insertToken(parent: ASTNode, tok: Token) {
+	for (const child of parent.children) {
+		if ('type' in child && 'children' in child) {
+			const n = child as ASTNode;
+			if (n.startIndex <= tok.startIndex && tok.endIndex <= n.endIndex) {
+				insertToken(n, tok);
+				return;
+			}
+		}
+	}
+
+	// No containing child → token belongs here
+	parent.children = insertSorted(parent.children, tok);
+}
+
+/* -------------------------- buildCST -------------------------- */
+
+/**
+ * Build a proper CST:
+ * - Named nodes only (from wrapNamedNodes)
+ * - Tokens inserted back into correct positions
+ * - Only one `children` array in each node
+ */
+export function buildCST(rootNode, source: string): ASTNode {
 	const tokens = collectTokens(rootNode, source);
-	const wrapped = wrapNode(rootNode);
+	const wrapped = wrapNamedNodes(rootNode);
 
-	for (const tok of tokens) {
-		insertToken(wrapped, tok);
+	let root: ASTNode;
+	if (wrapped.length === 1) root = wrapped[0];
+	else {
+		// multiple top-level named nodes → synthesize a root
+		root = {
+			type: 'root',
+			startIndex: rootNode.startIndex,
+			endIndex: rootNode.endIndex,
+			children: wrapped
+		};
 	}
 
-	console.log('Wrapped:', wrapped);
-	return wrapped;
+	// Insert all tokens
+	for (const tok of tokens) insertToken(root, tok);
+
+	return root;
 }
 
-/* ──────────────────────────────────────────────────────────────
- * Step 5 — Convert CST → LayoutTree
- * ────────────────────────────────────────────────────────────── */
-
-function toLayoutTree(node: ASTNode | Token): LayoutTree {
-	if (isToken(node)) {
+export function toLayoutTree(node: ASTNode | Token): LayoutTree {
+	if ('text' in node) {
 		return { type: 'Atom', text: node.text };
 	}
 
 	return {
 		type: 'Node',
 		padding: 0,
-		children: node.cstChildren.map(toLayoutTree)
+		children: node.children.map(toLayoutTree)
 	};
-}
-
-function isToken(x: ASTNode | Token): x is Token {
-	return (x as any).text !== undefined;
 }
 
 async function updateRaggedBlocks() {
