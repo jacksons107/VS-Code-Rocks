@@ -1,6 +1,6 @@
 import * as monaco from 'monaco-editor';
 import './index.css';
-import { LayoutTree } from '../../src/layout-tree';
+import { LayoutTree, Node, Spacer, Atom, Newline } from '../../src/layout-tree';
 import layout, { RenderSettings } from '../../demo/layout';
 import * as rb from '../../src/';
 import { OutlinedRocksLayoutSettings, RocksLayoutSettings } from '../../src/rocks-layout/layout';
@@ -72,10 +72,10 @@ async function extractFragmentsFromLayout(
 	for (const frag of layoutResult.fragmentsInfo()) {
 		const atom = atomsIter.next().value as rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
 
-		console.log(
-			`${frag.text}: left=${frag.rect.left}, top=${frag.rect.top},
-				right=${frag.rect.right}, bottom=${frag.rect.bottom}`
-		);
+		// console.log(
+		// 	`${frag.text}: left=${frag.rect.left}, top=${frag.rect.top},
+		// 		right=${frag.rect.right}, bottom=${frag.rect.bottom}`
+		// );
 
 		fragments.push({
 			text: frag.text,
@@ -110,7 +110,7 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 			const range = new monaco.Range(line, start, line, end);
 
 			allTokens.push({ text, range });
-			console.log(`Token: "${text}"`, range);
+			// console.log(`Token: "${text}"`, range);
 		}
 	}
 	console.groupEnd();
@@ -147,9 +147,9 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 				endRange.endColumn
 			);
 			mapped.push({ frag, range: mergedRange });
-			console.log(
-				`"${frag.text}" ↔ line ${mergedRange.startLineNumber}, col ${mergedRange.startColumn}`
-			);
+			// console.log(
+			// 	`"${frag.text}" ↔ line ${mergedRange.startLineNumber}, col ${mergedRange.startColumn}`
+			// );
 		} else {
 			console.warn(`Could not find token(s) for fragment "${frag.text}"`);
 		}
@@ -196,14 +196,14 @@ function computeLineSpacingFromFragments(fragments: any[]) {
 		const next = lines[i + 1];
 		const gap = next.top - current.bottom;
 		verticalGaps.push({ lineIndex: i, gap });
-		console.log(
-			`Gap between line ${i} and ${i + 1}: ${gap.toFixed(2)}px (bottom=${current.bottom.toFixed(
-				1
-			)}, next.top=${next.top.toFixed(1)})`
-		);
+		// console.log(
+		// 	`Gap between line ${i} and ${i + 1}: ${gap.toFixed(2)}px (bottom=${current.bottom.toFixed(
+		// 		1
+		// 	)}, next.top=${next.top.toFixed(1)})`
+		// );
 	}
 
-	console.log('Computed line vertical gaps:', verticalGaps);
+	// console.log('Computed line vertical gaps:', verticalGaps);
 	return verticalGaps;
 }
 
@@ -291,15 +291,15 @@ function applyFragmentDecorations(
 			}
 		`);
 
-		console.log(
-			`#${i} "${
-				frag.text
-			}" startCol=${startCol} numCols=${numColumns} layoutW=${layoutWidth.toFixed(
-				2
-			)} tokenW=${tokenTextWidth.toFixed(2)} extraLeft=${extraLeft.toFixed(
-				2
-			)} spacer=${spacerWidth.toFixed(2)}`
-		);
+		// console.log(
+		// 	`#${i} "${
+		// 		frag.text
+		// 	}" startCol=${startCol} numCols=${numColumns} layoutW=${layoutWidth.toFixed(
+		// 		2
+		// 	)} tokenW=${tokenTextWidth.toFixed(2)} extraLeft=${extraLeft.toFixed(
+		// 		2
+		// 	)} spacer=${spacerWidth.toFixed(2)}`
+		// );
 	}
 
 	console.groupEnd();
@@ -342,11 +342,122 @@ function applyFragmentDecorations(
 			});
 
 			currentViewZoneIds.push(zoneId);
-			console.log(`Added view zone after line ${lineIndex + 1} (height ${gap}px)`);
+			// console.log(`Added view zone after line ${lineIndex + 1} (height ${gap}px)`);
 		}
 	});
 
 	console.groupEnd();
+}
+
+interface Token {
+	type: string;
+	text: string;
+	startIndex: number;
+	endIndex: number;
+}
+
+interface ASTNode {
+	type: string;
+	startIndex: number;
+	endIndex: number;
+	astChildren: ASTNode[];
+	cstChildren: Array<ASTNode | Token>;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Step 1 — Walk the tree and collect all leaf nodes (tokens)
+ * ────────────────────────────────────────────────────────────── */
+function collectTokens(node, source, tokens = []) {
+	if (node.childCount === 0) {
+		tokens.push({
+			type: node.type,
+			text: source.slice(node.startIndex, node.endIndex),
+			startIndex: node.startIndex,
+			endIndex: node.endIndex
+			// isNamed: node.isNamed()
+		});
+	} else {
+		for (const child of node.children) {
+			collectTokens(child, source, tokens);
+		}
+	}
+	return tokens;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Step 2 — Wrap Tree-sitter AST nodes into our structure
+ * ────────────────────────────────────────────────────────────── */
+
+function wrapNode(tsNode): ASTNode {
+	return {
+		type: tsNode.type,
+		startIndex: tsNode.startIndex,
+		endIndex: tsNode.endIndex,
+		astChildren: tsNode.children.map(wrapNode),
+		cstChildren: [] // will be filled later
+	};
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Step 3 — Token insertion based on interval containment
+ * ────────────────────────────────────────────────────────────── */
+
+function tokenBelongs(node: ASTNode, tok: Token): boolean {
+	return node.startIndex <= tok.startIndex && tok.endIndex <= node.endIndex;
+}
+
+function insertToken(node: ASTNode, tok: Token): void {
+	// 1. Descend into AST children if the token fits in any of them
+	for (const child of node.astChildren) {
+		if (tokenBelongs(child, tok)) {
+			insertToken(child, tok);
+			return;
+		}
+	}
+
+	// 2. Token does not fit in any children → it belongs here.
+	// Insert in sorted order by startIndex.
+	let i = 0;
+	while (i < node.cstChildren.length && node.cstChildren[i].startIndex <= tok.startIndex) {
+		i++;
+	}
+	node.cstChildren.splice(i, 0, tok);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Step 4 — Build the full CST
+ * ────────────────────────────────────────────────────────────── */
+
+function buildCST(rootNode, source: string): ASTNode {
+	const tokens = collectTokens(rootNode, source);
+	const wrapped = wrapNode(rootNode);
+
+	for (const tok of tokens) {
+		insertToken(wrapped, tok);
+	}
+
+	console.log('Wrapped:', wrapped);
+	return wrapped;
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * Step 5 — Convert CST → LayoutTree
+ * ────────────────────────────────────────────────────────────── */
+
+function toLayoutTree(node: ASTNode | Token): LayoutTree {
+	if (isToken(node)) {
+		return { type: 'Atom', text: node.text };
+	}
+
+	return {
+		type: 'Node',
+		padding: 0,
+		children: node.cstChildren.map(toLayoutTree)
+	};
+}
+
+function isToken(x: ASTNode | Token): x is Token {
+	return (x as any).text !== undefined;
 }
 
 async function updateRaggedBlocks() {
@@ -359,9 +470,17 @@ async function updateRaggedBlocks() {
 	const source = model.getValue();
 	console.log('Source:', source);
 
-	// Tree sitter parse
+	// Step 2: Parse with Tree Sitter
 	const tsTree = parser.parse(source);
 	console.log('Tree-sitter AST:', tsTree.rootNode.toString());
+
+	// Step 3: Collect tokens with postions from AST
+	// const tokens = collectTokens(tsTree.rootNode, source);
+	// console.log('Tree sitter tokens:', tokens);
+
+	const cst = buildCST(tsTree.rootNode, source);
+	const layoutTree = toLayoutTree(cst);
+	console.log('Generated LayoutTree:', layoutTree);
 
 	// TODO: replace this with a real parser
 	/*
@@ -370,8 +489,7 @@ async function updateRaggedBlocks() {
 				for j in range(0, 10)
 				if i != j]
 	*/
-	const listCompExample = `
-[pairs]@nm =
+	const listCompExample = `[pairs]@nm =
   [\\[ [([i]@nm, [j]@nm)]@expr
      [for [i]@nm in [range([0]@nm, [10]@nm)]@expr
      [for [j]@nm in [range([0]@nm, [10]@nm)]@expr
@@ -397,7 +515,7 @@ async function updateRaggedBlocks() {
 }`;
 
 	const tree = parseExample(listCompExample);
-	// console.log(compTree);
+	console.log('Example Tree:', tree);
 	if (typeof tree === 'string') {
 		// Parse failed — `result` is an error message
 		console.error('Parse error:', tree);
@@ -467,3 +585,21 @@ editor.onDidScrollChange(() => requestAnimationFrame(updateRaggedBlocks));
 
 // Kick off the first run after editor init
 setTimeout(() => updateRaggedBlocks(), 200);
+
+// (module
+// 	(expression_statement
+// 		(assignment
+// 			left: (identifier)
+// 			right: (list_comprehension
+// 						body: (tuple (identifier) (identifier))
+// 						(for_in_clause
+// 							left: (identifier)
+// 							right: (call
+// 										function: (identifier)
+// 										arguments: (argument_list (integer) (integer))))
+// 						(for_in_clause
+// 							left: (identifier)
+// 							right: (call
+// 										function: (identifier)
+// 										arguments: (argument_list (integer) (integer))))
+// 						(if_clause (comparison_operator (identifier) (identifier)))))))
