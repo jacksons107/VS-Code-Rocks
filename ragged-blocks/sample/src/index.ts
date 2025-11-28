@@ -43,10 +43,10 @@ pairs = [(i, j)
 const editor = monaco.editor.create(document.body, {
 	value: [
 		'pairs =',
-		'[ (i, j)',
-		'for i in range(0, 10)',
-		'for j in range(0, 10)',
-		'if i != j ]'
+		'	[ (i, j)',
+		'		for i in range(0, 10)',
+		'		for j in range(0, 10)',
+		'		if i != j ]'
 	].join('\n'),
 	language: 'python'
 });
@@ -72,6 +72,7 @@ async function extractFragmentsFromLayout(
 	for (const frag of layoutResult.fragmentsInfo()) {
 		const atom = atomsIter.next().value as rb.Atom<rb.WithMeasurements<rb.WithStyles>>;
 
+		// DEBUG
 		// console.log(
 		// 	`${frag.text}: left=${frag.rect.left}, top=${frag.rect.top},
 		// 		right=${frag.rect.right}, bottom=${frag.rect.bottom}`
@@ -89,13 +90,14 @@ async function extractFragmentsFromLayout(
 	return fragments;
 }
 
-function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragments: any[]) {
+function getMonacoTokens() {
 	const model = editor.getModel();
 	if (!model) return [];
 
 	const languageId = model.getLanguageId();
 	const allTokens: { text: string; range: monaco.Range }[] = [];
 
+	// TODO factor out into helper function
 	console.group('Collecting Tokens');
 	// Collect all tokens from all lines, in order
 	for (let line = 1; line <= model.getLineCount(); line++) {
@@ -110,10 +112,40 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 			const range = new monaco.Range(line, start, line, end);
 
 			allTokens.push({ text, range });
-			// console.log(`Token: "${text}"`, range);
+			console.log(`Token: "${text}"`, range);
 		}
 	}
 	console.groupEnd();
+
+	return allTokens;
+}
+
+function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragments: any[]) {
+	// const model = editor.getModel();
+	// if (!model) return [];
+
+	// const languageId = model.getLanguageId();
+	// const allTokens: { text: string; range: monaco.Range }[] = [];
+
+	// console.group('Collecting Tokens');
+	// // Collect all tokens from all lines, in order
+	// for (let line = 1; line <= model.getLineCount(); line++) {
+	// 	const content = model.getLineContent(line);
+	// 	const tokens = monaco.editor.tokenize(content, languageId)[0];
+	// 	if (!tokens) continue;
+
+	// 	for (let i = 0; i < tokens.length; i++) {
+	// 		const start = tokens[i].offset + 1;
+	// 		const end = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
+	// 		const text = content.slice(start - 1, end - 1);
+	// 		const range = new monaco.Range(line, start, line, end);
+
+	// 		allTokens.push({ text, range });
+	// 		console.log(`Token: "${text}"`, range);
+	// 	}
+	// }
+	// console.groupEnd();
+	const allTokens = getMonacoTokens();
 
 	// --- Now match fragments to tokens (handles ", " combined fragments) ---
 	const mapped: { frag: any; range: monaco.Range }[] = [];
@@ -147,6 +179,7 @@ function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragm
 				endRange.endColumn
 			);
 			mapped.push({ frag, range: mergedRange });
+			// DEBUG
 			// console.log(
 			// 	`"${frag.text}" ↔ line ${mergedRange.startLineNumber}, col ${mergedRange.startColumn}`
 			// );
@@ -196,6 +229,7 @@ function computeLineSpacingFromFragments(fragments: any[]) {
 		const next = lines[i + 1];
 		const gap = next.top - current.bottom;
 		verticalGaps.push({ lineIndex: i, gap });
+		// DEBUG
 		// console.log(
 		// 	`Gap between line ${i} and ${i + 1}: ${gap.toFixed(2)}px (bottom=${current.bottom.toFixed(
 		// 		1
@@ -203,6 +237,7 @@ function computeLineSpacingFromFragments(fragments: any[]) {
 		// );
 	}
 
+	// DEBUG
 	// console.log('Computed line vertical gaps:', verticalGaps);
 	return verticalGaps;
 }
@@ -291,6 +326,7 @@ function applyFragmentDecorations(
 			}
 		`);
 
+		// DEBUG
 		// console.log(
 		// 	`#${i} "${
 		// 		frag.text
@@ -342,6 +378,7 @@ function applyFragmentDecorations(
 			});
 
 			currentViewZoneIds.push(zoneId);
+			// DEBUG
 			// console.log(`Added view zone after line ${lineIndex + 1} (height ${gap}px)`);
 		}
 	});
@@ -352,7 +389,7 @@ function applyFragmentDecorations(
 /* ------------------------- Internal Types ------------------------- */
 
 export interface Token {
-	type: string;
+	type?: string;
 	text: string;
 	startIndex: number;
 	endIndex: number;
@@ -389,6 +426,75 @@ export function collectTokens(node, source: string): Token[] {
 
 	walk(node);
 	return tokens.sort((a, b) => a.startIndex - b.startIndex);
+}
+
+/* ----------------------- Insert Whitespace Tokens ----------------------- */
+function addWhitespace(tsTokens: Token[]): Token[] {
+	const mTokens = getMonacoTokens();
+	const result: Token[] = [];
+
+	let ti = 0; // index in tsTokens
+	let mi = 0; // index in mTokens
+
+	// Helper for synthetic whitespace tokens
+	const makeWhitespaceToken = (text: string, left: Token | null, right: Token | null): Token => {
+		let start: number;
+		let end: number;
+
+		if (left && right) {
+			// Place whitespace in the gap
+			start = left.endIndex;
+			end = right.startIndex;
+		} else if (left) {
+			// After last real token
+			start = left.endIndex;
+			end = start + text.length;
+		} else if (right) {
+			// Before first real token
+			end = right.startIndex;
+			start = end - text.length;
+		} else {
+			// No context at all (empty file)
+			start = 0;
+			end = text.length;
+		}
+
+		return { text, startIndex: start, endIndex: end };
+	};
+
+	while (mi < mTokens.length && ti < tsTokens.length) {
+		const mt = mTokens[mi].text;
+		const tt = tsTokens[ti].text;
+
+		if (mt === tt) {
+			// Exact match → take the tree-sitter token
+			result.push(tsTokens[ti]);
+			mi++;
+			ti++;
+		} else {
+			// No match → treat as whitespace or non-TS token
+			const left = result.length > 0 ? result[result.length - 1] : null;
+			const right = tsTokens[ti];
+			result.push(makeWhitespaceToken(mt, left, right));
+			mi++;
+		}
+	}
+
+	// Remaining editor tokens after last TS token → emit as whitespace
+	const lastReal = result.length > 0 ? result[result.length - 1] : null;
+	while (mi < mTokens.length) {
+		const mt = mTokens[mi].text;
+		result.push(makeWhitespaceToken(mt, lastReal, null));
+		mi++;
+	}
+
+	// Remaining tree-sitter tokens (unlikely, but safe)
+	while (ti < tsTokens.length) {
+		result.push(tsTokens[ti]);
+		ti++;
+	}
+
+	return result;
 }
 
 /* ---------------------- wrapNamedNodes (CST skeleton) ---------------------- */
@@ -470,7 +576,9 @@ export function insertToken(parent: ASTNode, tok: Token) {
  * - Only one `children` array in each node
  */
 export function buildCST(rootNode, source: string): ASTNode {
-	const tokens = collectTokens(rootNode, source);
+	const tsTokens = collectTokens(rootNode, source);
+	// TODO add function to insert whitespace into tokens
+	const tokens = addWhitespace(tsTokens);
 	const wrapped = wrapNamedNodes(rootNode);
 
 	let root: ASTNode;
@@ -511,10 +619,12 @@ async function updateRaggedBlocks() {
 
 	// Step 1: Extract current editor text
 	const source = model.getValue();
+	// DEBUG
 	console.log('Source:', source);
 
 	// Step 2: Parse with Tree Sitter
 	const tsTree = parser.parse(source);
+	// DEBUG
 	console.log('Tree-sitter AST:', tsTree.rootNode.toString());
 
 	// Step 3: Collect tokens with postions from AST
@@ -523,9 +633,10 @@ async function updateRaggedBlocks() {
 
 	const cst = buildCST(tsTree.rootNode, source);
 	const layoutTree = toLayoutTree(cst);
+	// DEBUG
 	console.log('Generated LayoutTree:', layoutTree);
 
-	// TODO: replace this with a real parser
+	// TODO get rid of this when real pipeline is working
 	/*
 	pairs = [(i, j)
 				for i in range(0, 10)
