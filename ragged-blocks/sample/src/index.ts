@@ -95,12 +95,12 @@ function getMonacoTokens() {
 	if (!model) return [];
 
 	const languageId = model.getLanguageId();
-	const allTokens: { text: string; range: monaco.Range }[] = [];
+	const allTokens: { text: string; range: monaco.Range }[][] = [];
 
-	// TODO factor out into helper function
 	console.group('Collecting Tokens');
 	// Collect all tokens from all lines, in order
 	for (let line = 1; line <= model.getLineCount(); line++) {
+		const lineTokens: { text: string; range: monaco.Range }[] = [];
 		const content = model.getLineContent(line);
 		const tokens = monaco.editor.tokenize(content, languageId)[0];
 		if (!tokens) continue;
@@ -111,9 +111,12 @@ function getMonacoTokens() {
 			const text = content.slice(start - 1, end - 1);
 			const range = new monaco.Range(line, start, line, end);
 
-			allTokens.push({ text, range });
+			// allTokens.push({ text, range });
+			lineTokens.push({ text, range });
 			console.log(`Token: "${text}"`, range);
 		}
+
+		allTokens.push(lineTokens);
 	}
 	console.groupEnd();
 
@@ -121,31 +124,9 @@ function getMonacoTokens() {
 }
 
 function mapFragmentsToTokens(editor: monaco.editor.IStandaloneCodeEditor, fragments: any[]) {
-	// const model = editor.getModel();
-	// if (!model) return [];
-
-	// const languageId = model.getLanguageId();
-	// const allTokens: { text: string; range: monaco.Range }[] = [];
-
-	// console.group('Collecting Tokens');
-	// // Collect all tokens from all lines, in order
-	// for (let line = 1; line <= model.getLineCount(); line++) {
-	// 	const content = model.getLineContent(line);
-	// 	const tokens = monaco.editor.tokenize(content, languageId)[0];
-	// 	if (!tokens) continue;
-
-	// 	for (let i = 0; i < tokens.length; i++) {
-	// 		const start = tokens[i].offset + 1;
-	// 		const end = i + 1 < tokens.length ? tokens[i + 1].offset + 1 : content.length + 1;
-	// 		const text = content.slice(start - 1, end - 1);
-	// 		const range = new monaco.Range(line, start, line, end);
-
-	// 		allTokens.push({ text, range });
-	// 		console.log(`Token: "${text}"`, range);
-	// 	}
-	// }
-	// console.groupEnd();
-	const allTokens = getMonacoTokens();
+	// const allTokens = getMonacoTokens();
+	const tokenMatrix = getMonacoTokens();
+	const allTokens = tokenMatrix.flat(1);
 
 	// --- Now match fragments to tokens (handles ", " combined fragments) ---
 	const mapped: { frag: any; range: monaco.Range }[] = [];
@@ -428,9 +409,31 @@ export function collectTokens(node, source: string): Token[] {
 	return tokens.sort((a, b) => a.startIndex - b.startIndex);
 }
 
+function addNewlineTokens(
+	lines: { text: string; range: monaco.Range }[][]
+): { text: string; range: monaco.Range }[][] {
+	return lines.map((lineTokens, lineIndex) => {
+		const lineNumber = lineIndex + 1;
+
+		// Determine where to place the newline token
+		const lastToken = lineTokens[lineTokens.length - 1];
+		const endColumn = lastToken ? lastToken.range.endColumn : 1; // empty line → place newline at column 1
+
+		const newlineToken = {
+			text: '\n',
+			range: new monaco.Range(lineNumber, endColumn, lineNumber, endColumn + 1)
+		};
+
+		// Return a new array (immutability)
+		return [...lineTokens, newlineToken];
+	});
+}
+
 /* ----------------------- Insert Whitespace Tokens ----------------------- */
 function addWhitespace(tsTokens: Token[]): Token[] {
-	const mTokens = getMonacoTokens();
+	const tokens = getMonacoTokens();
+	const withNewlines = addNewlineTokens(tokens);
+	const mTokens = withNewlines.flat(1);
 	const result: Token[] = [];
 
 	let ti = 0; // index in tsTokens
@@ -577,7 +580,6 @@ export function insertToken(parent: ASTNode, tok: Token) {
  */
 export function buildCST(rootNode, source: string): ASTNode {
 	const tsTokens = collectTokens(rootNode, source);
-	// TODO add function to insert whitespace into tokens
 	const tokens = addWhitespace(tsTokens);
 	const wrapped = wrapNamedNodes(rootNode);
 
@@ -601,6 +603,9 @@ export function buildCST(rootNode, source: string): ASTNode {
 
 export function toLayoutTree(node: ASTNode | Token): LayoutTree {
 	if ('text' in node) {
+		// TODO regex to match any number of tabs
+		// then create a Spacer LayoutTree
+		// else create an Atom LayoutTree
 		return { type: 'Atom', text: node.text };
 	}
 
