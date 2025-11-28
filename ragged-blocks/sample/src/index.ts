@@ -429,6 +429,7 @@ function addNewlineTokens(
 	});
 }
 
+// TODO add case for moving leading whitespace to end of previous line
 /* ----------------------- Insert Whitespace Tokens ----------------------- */
 function addWhitespace(tsTokens: Token[]): Token[] {
 	const tokens = getMonacoTokens();
@@ -611,7 +612,7 @@ export function toLayoutTree(node: ASTNode | Token): LayoutTree {
 		if (/^\t+$/.test(text)) {
 			return {
 				type: 'Spacer',
-				text: text // number of tabs
+				text: text
 			};
 		}
 
@@ -636,6 +637,39 @@ export function toLayoutTree(node: ASTNode | Token): LayoutTree {
 	};
 }
 
+// function hoistLeadingSpacers(node: LayoutTree): LayoutTree {
+// 	if (node.type !== 'Node') return node;
+
+// 	const newChildren: LayoutTree[] = [];
+
+// 	for (let i = 0; i < node.children.length; i++) {
+// 		let child = node.children[i];
+
+// 		// Process recursively first
+// 		child = hoistLeadingSpacers(child);
+
+// 		// If child is a Node with a leading Spacer, hoist it
+// 		if (child.type === 'Node' && child.children.length > 0) {
+// 			const first = child.children[0];
+
+// 			if (first.type === 'Spacer') {
+// 				// Remove spacer from child
+// 				child.children.shift();
+
+// 				// Hoist spacer into the current node
+// 				newChildren.push(first);
+// 			}
+// 		}
+
+// 		newChildren.push(child);
+// 	}
+
+// 	node.children = newChildren;
+// 	return node;
+// }
+
+let currentSvgOverlay: HTMLDivElement | null = null;
+
 async function updateRaggedBlocks() {
 	console.group('RaggedBlocks Update');
 
@@ -647,19 +681,20 @@ async function updateRaggedBlocks() {
 	// DEBUG
 	console.log('Source:', source);
 
-	// Step 2: Parse with Tree Sitter
+	// Step 2: Parse into AST with Tree Sitter
 	const tsTree = parser.parse(source);
 	// DEBUG
 	console.log('Tree-sitter AST:', tsTree.rootNode.toString());
 
-	// Step 3: Collect tokens with postions from AST
-	// const tokens = collectTokens(tsTree.rootNode, source);
-	// console.log('Tree sitter tokens:', tokens);
-
+	// Step 3: Build CST from Tree Sitter AST
 	const cst = buildCST(tsTree.rootNode, source);
+
+	// Step 4: Convert CST to LayoutTree
 	const layoutTree = toLayoutTree(cst);
+	// const fixedTree = hoistLeadingSpacers(layoutTree);
 	// DEBUG
 	console.log('Generated LayoutTree:', layoutTree);
+	// console.log('Generated LayoutTree:', fixedTree);
 
 	// TODO get rid of this when real pipeline is working
 	/*
@@ -693,7 +728,10 @@ async function updateRaggedBlocks() {
   border: 1 1 -1 white top right;
 }`;
 
-	const tree = parseExample(listCompExample);
+	// Example vs generated tree
+	// const tree = parseExample(listCompExample);
+	const tree = layoutTree;
+	// const tree = fixedTree;
 	console.log('Example Tree:', tree);
 	if (typeof tree === 'string') {
 		// Parse failed — `result` is an error message
@@ -715,31 +753,40 @@ async function updateRaggedBlocks() {
 	const algoSettings = new OutlinedRocksLayoutSettings(true, 10, true);
 	const renderSettings = <RenderSettings>{
 		renderDistanceMesh: false,
-		renderFragmentBoundingBoxes: false,
+		renderFragmentBoundingBoxes: true,
 		renderText: false
 	};
 	const algoName = 'L1S+';
 
+	// Step 3: Run layout
 	let result;
 	try {
 		result = await layout(measured, algoName, algoSettings, renderSettings, false);
 		console.log('Layout done:', result.status);
-		const svgContainer = document.createElement('div');
-		svgContainer.innerHTML = result.svgSrc;
-		// document.body.appendChild(svgContainer);
+
 		const editorDom = editor.getDomNode();
 		const viewLines = editorDom?.querySelector('.view-lines');
 		if (viewLines) {
+			// REMOVE OLD SVG IF IT EXISTS
+			if (currentSvgOverlay) {
+				currentSvgOverlay.remove();
+				currentSvgOverlay = null;
+			}
+
+			// CREATE NEW SVG OVERLAY
+			const svgContainer = document.createElement('div');
+			svgContainer.innerHTML = result.svgSrc;
 			svgContainer.style.position = 'absolute';
 			svgContainer.style.pointerEvents = 'none';
-			svgContainer.style.zIndex = '0'; // below text layer
-			// svgContainer.style.opacity = '0.6';
+			svgContainer.style.zIndex = '0'; // or -1 depending on layering
 			svgContainer.style.top = '0px';
 			svgContainer.style.left = '0px';
 			svgContainer.style.width = '100%';
 			svgContainer.style.height = '100%';
-			svgContainer.style.transform = 'translate(-9px, -8px)'; // adjust position
-			viewLines.prepend(svgContainer); // place SVG beneath text
+			svgContainer.style.transform = 'translate(-9px, -8px)';
+
+			viewLines.prepend(svgContainer);
+			currentSvgOverlay = svgContainer;
 		}
 	} catch (e) {
 		console.error('Layout error:', e);
