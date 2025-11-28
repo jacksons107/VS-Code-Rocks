@@ -113,7 +113,7 @@ function getMonacoTokens() {
 
 			// allTokens.push({ text, range });
 			lineTokens.push({ text, range });
-			console.log(`Token: "${text}"`, range);
+			// console.log(`Token: "${text}"`, range);
 		}
 
 		allTokens.push(lineTokens);
@@ -603,10 +603,30 @@ export function buildCST(rootNode, source: string): ASTNode {
 
 export function toLayoutTree(node: ASTNode | Token): LayoutTree {
 	if ('text' in node) {
-		// TODO regex to match any number of tabs
-		// then create a Spacer LayoutTree
-		// else create an Atom LayoutTree
-		return { type: 'Atom', text: node.text };
+		// return { type: 'Atom', text: node.text };
+		const text = node.text;
+
+		// 1. Tab-based indentation or spacing
+		// Any number of tabs: "\t", "\t\t", etc.
+		if (/^\t+$/.test(text)) {
+			return {
+				type: 'Spacer',
+				text: text // number of tabs
+			};
+		}
+
+		// 2. Newline
+		if (text === '\n') {
+			return {
+				type: 'Newline'
+			};
+		}
+
+		// 3. Normal token → Atom
+		return {
+			type: 'Atom',
+			text: text
+		};
 	}
 
 	return {
